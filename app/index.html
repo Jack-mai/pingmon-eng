@@ -1,0 +1,1534 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Giám sát mạng nội bộ</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%232ea043'/%3E%3C/svg%3E" id="favicon">
+<script>
+  // Ap dung giao dien ngay/dem truoc khi ve trang
+  (function () {
+    var m = "dark"; try { m = JSON.parse(localStorage.getItem("pm.theme")) || "dark"; } catch (e) {}
+    var h = new Date().getHours();
+    document.documentElement.dataset.theme = m === "auto" ? (h >= 6 && h < 18 ? "light" : "dark") : m;
+  })();
+</script>
+<style>
+  /* ===== Giao dien DEM (mac dinh) ===== */
+  :root {
+    --bg: #0b0f14; --panel: #131a22; --panel2: #18212b; --line: #263241; --text: #e6edf3; --muted: #8b98a8;
+    --up: #2ea043; --up-bg: #0f2a18; --up-text: var(--up-text); --up-flash: var(--up-flash);
+    --down: #f85149; --down-bg: #3a1214; --down-line: var(--down-line); --down-text: var(--down-text); --down-text2: var(--down-text2);
+    --down-flash: var(--down-flash); --danger-bg: var(--danger-bg);
+    --warn: #d29922; --gray: #6e7681; --accent: #388bfd; --sel: #1c3a63; --evnew: var(--evnew);
+    --shadow: var(--shadow); --overlay: var(--overlay); --unlock-bg: var(--unlock-bg);
+    --radius: 10px; color-scheme: dark;
+  }
+  /* ===== Giao dien NGAY ===== */
+  :root[data-theme="light"] {
+    --bg: #f3f5f8; --panel: #ffffff; --panel2: #eef1f5; --line: #d5dbe3; --text: #1b2430; --muted: #5f6b7a;
+    --up: #1a7f37; --up-bg: #e9f7ee; --up-text: #135c28; --up-flash: #bfe8cc;
+    --down: #cf222e; --down-bg: #fdecec; --down-line: #f2b8bc; --down-text: #a40e26; --down-text2: #7d0a1c;
+    --down-flash: #f8c9cd; --danger-bg: #fff3f3;
+    --warn: #bf8700; --gray: #8c959f; --accent: #0969da; --sel: #dbeafe; --evnew: #dbeafe;
+    --shadow: rgba(30,40,60,.18); --overlay: rgba(20,30,45,.45); --unlock-bg: rgba(240,243,247,.94);
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 1px solid var(--line); background: var(--panel2); border-radius: 8px;
+    padding: 7px 14px; font-weight: 600; white-space: nowrap; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { background: transparent; border-color: var(--down); color: var(--down); }
+  button.danger.solid { background: var(--down); color: #fff; }
+  button.ghost { background: transparent; }
+  button.on { background: var(--sel); border-color: var(--accent); }
+  button.sm { padding: 4px 10px; font-size: 13px; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  [hidden] { display: none !important; }
+  input, select, textarea { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  label { display: block; color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
+  code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+
+  /* ---------- header ---------- */
+  header { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+    padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+  .logo { width: 12px; height: 12px; border-radius: 50%; background: var(--up); box-shadow: 0 0 10px var(--up); flex: none; }
+  .logo.bad { background: var(--down); box-shadow: 0 0 10px var(--down); }
+  .stats { display: flex; gap: 8px; flex-wrap: wrap; }
+  .stat { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 13px; color: var(--muted);
+    cursor: pointer; user-select: none; }
+  .stat b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .stat.up b { color: var(--up); } .stat.down b { color: var(--down); }
+  .stat.down.has { background: var(--down); border-color: var(--down); color: #fff; } .stat.down.has b { color: #fff; }
+  .stat.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hright { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .clock { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 15px; }
+  .conn { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--up); color: var(--up); }
+  .conn.lost { border-color: var(--warn); background: var(--warn); color: #000; font-weight: 700; }
+
+  #downbar { background: var(--down-bg); border-bottom: 1px solid var(--down); color: var(--down-text2); padding: 8px 20px;
+    font-weight: 600; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  #downbar .chip { background: var(--down); color: #fff; padding: 2px 10px; border-radius: 999px; font-size: 13px; cursor: pointer; }
+  #lostbar { background: var(--warn); color: #000; padding: 8px 20px; font-weight: 700; }
+
+  /* ---------- toolbar + layout ---------- */
+  .toolbar { display: flex; gap: 10px; padding: 14px 20px 0; flex-wrap: wrap; align-items: center; }
+  .toolbar input[type=search] { max-width: 300px; }
+  .toolbar select { width: auto; min-width: 150px; }
+  .toolbar .sp { flex: 1; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: transparent; padding: 7px 12px; }
+  .seg button.on { background: var(--sel); }
+
+  #selbar { margin: 12px 20px 0; padding: 8px 12px; background: var(--sel); border: 1px solid var(--accent); border-radius: var(--radius);
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center; position: sticky; top: 64px; z-index: 4; }
+  #selbar b { margin-right: 6px; }
+  #selbar .sp { flex: 1; }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) var(--log-w, 340px); gap: 16px; padding: 14px 20px 24px; align-items: start; }
+  body.nolog main { grid-template-columns: minmax(0, 1fr); }
+  body.nolog aside { display: none; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } aside { position: static !important; max-height: 60vh !important; }
+    .resizer { display: none; } }
+
+  /* ---------- tiles ---------- */
+  .group-title { grid-column: 1 / -1; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .06em; margin: 8px 0 -4px; display: flex; align-items: center; gap: 8px; }
+  .group-title button { text-transform: none; letter-spacing: 0; font-weight: 500; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tile-w, 230px), 1fr)); gap: 10px; }
+  .tile { position: relative; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--gray);
+    border-radius: var(--radius); padding: 10px 12px; min-height: 108px; min-width: 0; }
+  .tile.up { border-left-color: var(--up); }
+  .tile.down { background: var(--down-bg); border-color: var(--down-line); border-left-color: var(--down); }
+  .tile.paused { opacity: .55; }
+  .tile.flash { animation: flash 1s ease-in-out 8; }
+  @keyframes flash { 50% { box-shadow: 0 0 0 3px var(--fc, var(--down)); } }
+  .tile.up.flash { --fc: var(--up); }
+  .selecting .tile { cursor: pointer; user-select: none; }
+  .tile.picked { outline: 2px solid var(--accent); outline-offset: -1px; background: var(--sel); opacity: 1; }
+  .t-head { display: flex; align-items: flex-start; gap: 8px; }
+  .t-head input { margin-top: 3px; flex: none; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--gray); flex: none; margin-top: 6px; }
+  .up .dot { background: var(--up); }
+  .down .dot { background: var(--down); box-shadow: 0 0 8px var(--down); }
+  /* Ten dai: tu xuong dong, hien thi day du */
+  .t-name { font-weight: 700; font-size: 15px; line-height: 1.3; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .badge { font-size: 10px; font-weight: 700; letter-spacing: .05em; color: var(--muted); border: 1px solid var(--line);
+    border-radius: 4px; padding: 0 5px; flex: none; margin-top: 3px; }
+  .t-host { color: var(--muted); font-size: 12px; margin: 2px 0 6px 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-variant-numeric: tabular-nums; }
+  .t-state { font-weight: 700; font-size: 13px; }
+  .up .t-state { color: var(--up); } .down .t-state { color: var(--down); }
+  .unknown .t-state, .paused .t-state { color: var(--muted); }
+  .t-dur { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .down .t-dur { color: var(--down-text); }
+  .spark { display: flex; gap: 2px; height: 14px; align-items: flex-end; margin-top: 7px; }
+  .spark i { flex: 1; height: 100%; background: var(--up); border-radius: 1px; opacity: .8; }
+  .spark i.f { background: var(--down); }
+  .spark i.e { background: var(--line); }
+  .t-msg { font-size: 12px; color: var(--down-text); margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t-edit { flex: none; padding: 0 7px; font-size: 12px; line-height: 18px; font-weight: 600; opacity: .55; margin-top: 1px; }
+  .tile:hover .t-edit { opacity: 1; }
+  .t-edit:hover { border-color: var(--accent); color: var(--accent); }
+  .selecting .t-edit { display: none; }
+  .empty { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 50px 10px;
+    border: 1px dashed var(--line); border-radius: var(--radius); }
+
+  /* ---------- list view ---------- */
+  .tablewrap { grid-column: 1 / -1; overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; position: sticky; top: 0; background: var(--panel2); white-space: nowrap; cursor: pointer; }
+  td.nm { font-weight: 600; overflow-wrap: anywhere; min-width: 160px; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.down td { background: var(--down-bg); }
+  tr.down td.st { color: var(--down); font-weight: 700; }
+  tr.up td.st { color: var(--up); font-weight: 600; }
+  tr.paused { opacity: .55; }
+  tr.picked td { background: var(--sel) !important; }
+  tr.flash td { animation: rowflash 1s 8; }
+  @keyframes rowflash { 50% { background: var(--down-flash); } }
+  tr.up.flash td { animation-name: rowflashup; }
+  @keyframes rowflashup { 50% { background: var(--up-flash); } }
+  .selecting tbody tr { cursor: pointer; }
+  td .err { color: var(--down-text); font-size: 12px; }
+
+  /* ---------- events ---------- */
+  aside { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); position: sticky; top: 70px;
+    max-height: calc(100vh - 90px); display: flex; flex-direction: column; --fs: var(--log-fs, 13px); }
+  aside h2 { font-size: 14px; margin: 0; padding: 8px 8px 8px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center;
+    gap: 4px; flex-wrap: wrap; white-space: nowrap; }
+  aside h2 .sp { flex: 1; }
+  aside h2 label { margin: 0; display: flex; align-items: center; gap: 5px; font-weight: 400; cursor: pointer; font-size: 12px; }
+  aside h2 button { padding: 1px 6px; font-size: 12px; line-height: 20px; }
+  .resizer { position: absolute; left: -11px; top: 0; bottom: 0; width: 10px; cursor: col-resize; z-index: 2; }
+  .resizer::after { content: ""; position: absolute; left: 4px; top: 50%; height: 44px; margin-top: -22px; width: 3px;
+    border-radius: 2px; background: var(--line); }
+  .resizer:hover::after, body.resizing .resizer::after { background: var(--accent); }
+  body.resizing { cursor: col-resize; user-select: none; }
+  #events { overflow: auto; flex: 1; }
+  .ev { display: grid; grid-template-columns: calc(var(--fs) * 4.5) 1fr; gap: 8px; padding: 7px 14px; border-bottom: 1px solid var(--line);
+    font-size: var(--fs); }
+  .ev time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: calc(var(--fs) - 1px); line-height: 1.3; }
+  .ev .k { font-weight: 700; font-size: calc(var(--fs) - 2px); letter-spacing: .03em; margin-right: 6px; }
+  .ev .k.down { color: var(--down); } .ev .k.up { color: var(--up); }
+  .ev .k.other { color: var(--muted); }
+  .ev .n { overflow-wrap: anywhere; }
+  .ev .d { color: var(--muted); font-size: calc(var(--fs) - 1px); overflow-wrap: anywhere; }
+  .ev.new { animation: evnew 3s; }
+  @keyframes evnew { from { background: var(--evnew); } }
+
+  /* ---------- toast ---------- */
+  #toasts { position: fixed; right: 16px; bottom: 16px; z-index: 30; display: flex; flex-direction: column; gap: 8px; max-width: 380px; }
+  .toast { padding: 12px 16px; border-radius: 10px; font-weight: 600; box-shadow: 0 8px 24px var(--shadow);
+    animation: tin .25s; border: 1px solid; overflow-wrap: anywhere; }
+  .toast.down { background: var(--down-bg); border-color: var(--down); color: var(--down-text2); }
+  .toast.up { background: var(--up-bg); border-color: var(--up); color: var(--up-text); }
+  .toast.info { background: var(--panel2); border-color: var(--line); }
+  .toast small { display: block; font-weight: 400; opacity: .8; }
+  @keyframes tin { from { transform: translateY(10px); opacity: 0; } }
+
+  /* ---------- modal ---------- */
+  .modal { position: fixed; inset: 0; z-index: 20; background: var(--overlay); display: flex; align-items: flex-start;
+    justify-content: center; padding: 50px 16px; overflow: auto; }
+  .box { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; width: 100%; max-width: 500px; padding: 20px; }
+  .box.wide { max-width: 620px; }
+  .box h3 { margin: 0 0 6px; font-size: 17px; }
+  .box h4 { margin: 18px 0 2px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .box .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .pick { display: flex; gap: 6px; }
+  .pick select { flex: 1; }
+  .actions { display: flex; gap: 8px; margin-top: 18px; justify-content: flex-end; flex-wrap: wrap; }
+  .actions .left { margin-right: auto; }
+  .err { color: var(--down); margin-top: 10px; font-size: 13px; white-space: pre-line; max-height: 200px; overflow: auto; }
+  .check { display: flex; align-items: center; gap: 8px; margin: 10px 0; color: var(--text); font-size: 14px; cursor: pointer; }
+  .check.warnbox { background: var(--down-bg); border: 1px solid var(--down-line); border-radius: 8px; padding: 8px 10px; }
+  textarea { min-height: 180px; font-family: Consolas, monospace; font-size: 13px; }
+  input[type=range] { padding: 0; }
+  .danger-zone { margin-top: 20px; padding: 12px; border: 1px solid var(--down-line); border-radius: 8px; background: var(--danger-bg); }
+  .danger-zone p { margin: 0 0 8px; color: var(--down-text); font-size: 13px; }
+  .filebox { display: flex; gap: 8px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .filebox input[type=file] { padding: 4px; font-size: 12px; }
+
+  /* ---------- o lich su thiet bi (tro chuot vao ten) ---------- */
+  [data-hist] { cursor: help; }
+  [data-hist]:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
+  #hist { position: fixed; z-index: 25; width: 400px; max-width: calc(100vw - 16px); max-height: min(560px, 80vh);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 14px 36px var(--shadow);
+    display: flex; flex-direction: column; overflow: hidden; }
+  #hist:not(.pinned) { pointer-events: none; }
+  #hist .hh { padding: 12px 14px 10px; border-bottom: 1px solid var(--line); }
+  #hist .hh .nm { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; display: flex; gap: 8px; align-items: flex-start; }
+  #hist .hh .nm .dot { margin-top: 6px; }
+  #hist .hh .sub { color: var(--muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+  #hist .hh .now { margin-top: 6px; font-weight: 600; font-size: 13px; }
+  #hist .hh .now.down { color: var(--down); } #hist .hh .now.up { color: var(--up); } #hist .hh .now.other { color: var(--muted); }
+  .hstats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .hstats div { background: var(--panel2); border-radius: 8px; padding: 6px 8px; font-size: 11px; color: var(--muted); line-height: 1.35; }
+  .hstats b { display: block; font-size: 15px; color: var(--text); }
+  .hstats b.bad { color: var(--down); }
+  #hist .hl { overflow: auto; flex: 1; }
+  .hev { display: grid; grid-template-columns: 96px 1fr; gap: 8px; padding: 6px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .hev time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .hev .k { font-weight: 700; font-size: 11px; margin-right: 6px; }
+  .hev .k.down { color: var(--down); } .hev .k.up { color: var(--up); } .hev .k.other { color: var(--muted); }
+  .hev .len { font-size: 12px; color: var(--down-text); white-space: nowrap; }
+  .hev .len.on { font-weight: 700; color: var(--down); }
+  .hev .d { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  #hist .hf { padding: 6px 14px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); display: flex; justify-content: space-between; }
+  #hist .hempty { padding: 20px 14px; color: var(--muted); text-align: center; font-size: 13px; }
+
+  #unlock { position: fixed; inset: 0; z-index: 40; background: var(--unlock-bg); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px; text-align: center; padding: 20px; }
+  #unlock button { font-size: 20px; padding: 16px 30px; }
+  #unlock p { color: var(--muted); max-width: 520px; margin: 0; }
+
+  @media (max-width: 700px) {
+    header { position: static; padding: 10px 16px; } .toolbar, main { padding-left: 16px; padding-right: 16px; }
+    #downbar, #lostbar { padding: 8px 16px; } #selbar { margin: 12px 16px 0; top: 0; }
+    .toolbar input[type=search] { max-width: none; } .row2 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div id="unlock" hidden>
+  <button class="primary" id="btnUnlock">🔊 Bấm để bật âm thanh thông báo</button>
+  <p data-i18n="unlock">Trình duyệt cần một lần bấm để cho phép phát âm thanh. Máy trực chạy Chrome với cờ
+    <code>--autoplay-policy=no-user-gesture-required</code> sẽ không cần bước này.</p>
+  <button class="ghost" id="btnNoSound">Xem không cần âm thanh</button>
+</div>
+
+<header>
+  <h1><span class="logo" id="logo"></span><span id="title">Giám sát mạng nội bộ</span></h1>
+  <div class="stats">
+    <span class="stat" data-f="all">Tổng <b id="sTotal">0</b></span>
+    <span class="stat up" data-f="up">Hoạt động <b id="sUp">0</b></span>
+    <span class="stat down" data-f="down" id="statDown">Mất kết nối <b id="sDown">0</b></span>
+    <span class="stat" data-f="other">Chờ / tạm dừng <b id="sOther">0</b></span>
+  </div>
+  <div class="hright">
+    <span class="conn" id="conn">Đang kết nối…</span>
+    <span class="clock" id="clock"></span>
+    <button class="ghost" id="btnLang" title="Chuyển sang tiếng Anh">🌐 English</button>
+    <button class="ghost" id="btnTheme" title="Đổi giao diện ngày / đêm">🌙 Đêm</button>
+    <button class="ghost" id="btnSound" title="Cài đặt âm thanh trên máy này">🔊 Âm thanh</button>
+    <button class="ghost" id="btnLogin">Đăng nhập quản trị</button>
+    <button class="ghost" id="btnSettings" hidden>⚙ Cài đặt</button>
+  </div>
+</header>
+<div id="lostbar" hidden>⚠ MẤT KẾT NỐI TỚI MÁY CHỦ GIÁM SÁT – trạng thái trên màn hình có thể đã cũ</div>
+<div id="downbar" hidden></div>
+
+<div class="toolbar">
+  <input type="search" id="q" placeholder="Tìm tên, IP, nhóm, ghi chú…">
+  <select id="fGroup"><option value="">Tất cả nhóm</option></select>
+  <div class="seg" title="Kiểu hiển thị">
+    <button id="vTile" class="on">▦ Ô</button><button id="vList">☰ Danh sách</button>
+  </div>
+  <select id="tileSize" title="Cỡ ô" style="min-width:0">
+    <option value="200">Ô nhỏ</option><option value="230">Ô vừa</option><option value="300">Ô rộng</option><option value="380">Ô rất rộng</option>
+  </select>
+  <span class="sp"></span>
+  <button id="btnLog" title="Ẩn / hiện khung nhật ký sự kiện">📋 Nhật ký</button>
+  <button id="btnSelect" hidden>☑ Chọn nhiều</button>
+  <button id="btnImport" hidden>Nhập danh sách</button>
+  <button id="btnExport" hidden>Xuất CSV</button>
+  <button class="primary" id="btnAdd" hidden>+ Thêm thiết bị</button>
+</div>
+
+<div id="selbar" hidden>
+  <b id="selCount">Đã chọn 0</b>
+  <button class="sm" id="selAll">Chọn tất cả đang hiển thị</button>
+  <button class="sm" id="selDown">Chọn thiết bị mất kết nối</button>
+  <button class="sm" id="selNone">Bỏ chọn</button>
+  <span class="sp"></span>
+  <button class="sm" id="selPause" data-need>⏸ Tạm dừng</button>
+  <button class="sm" id="selResume" data-need>▶ Tiếp tục</button>
+  <button class="sm" id="selGroup" data-need>Chuyển nhóm…</button>
+  <button class="sm danger solid" id="selDelete" data-need>🗑 Xoá đã chọn</button>
+  <button class="sm ghost" id="selExit">Xong</button>
+</div>
+
+<main>
+  <div id="grid"></div>
+  <aside>
+    <div class="resizer" id="logResizer" title="Kéo để chỉnh độ rộng khung nhật ký (bấm đúp: về mặc định)"></div>
+    <h2>Nhật ký sự kiện <span class="sp"></span>
+      <button class="ghost" id="logSmaller" title="Chữ nhỏ hơn">A−</button>
+      <button class="ghost" id="logBigger" title="Chữ to hơn">A+</button>
+      <button class="ghost" id="logNarrow" title="Thu hẹp khung">Hẹp</button>
+      <button class="ghost" id="logWide" title="Mở rộng khung">Rộng</button>
+      <button class="ghost" id="logHide" title="Ẩn nhật ký">✕</button>
+    </h2>
+    <h2 style="padding-top:4px;padding-bottom:6px;border-bottom:1px solid var(--line)"><label><input type="checkbox" id="evOnlyState" checked> chỉ hiện mất / kết nối lại</label></h2>
+    <div id="events"></div>
+  </aside>
+</main>
+
+<div id="toasts"></div>
+<div id="hist" hidden></div>
+
+<!-- ===== Thiet bi ===== -->
+<div class="modal" id="mDevice" hidden>
+  <form class="box" id="fDevice" autocomplete="off">
+    <h3 id="dTitle">Thêm thiết bị</h3>
+    <input type="hidden" name="id">
+    <label>Tên thiết bị</label>
+    <input name="name" placeholder="VD: Switch tầng 3" maxlength="100">
+    <div class="row2">
+      <div><label>Loại kiểm tra</label>
+        <select name="type">
+          <option value="ping">Ping (ICMP)</option>
+          <option value="tcp">Cổng TCP</option>
+          <option value="http">Web HTTP(S)</option>
+          <option value="dns">Máy chủ DNS</option>
+        </select></div>
+      <div><label>Nhóm</label><input name="grp" list="groups" placeholder="VD: Tầng 3" maxlength="60"></div>
+    </div>
+    <label id="lHost">Địa chỉ IP / tên máy</label>
+    <input name="host" placeholder="VD: 192.168.1.1">
+    <div data-for="tcp dns"><label>Cổng</label><input name="port" type="number" min="1" max="65535" placeholder="VD: 3389"></div>
+    <div data-for="http"><label>URL</label><input name="target" data-t="http" placeholder="https://192.168.1.20/"></div>
+    <div data-for="dns"><label>Tên miền cần phân giải</label><input name="target" data-t="dns" placeholder="VD: example.local"></div>
+    <label>Ghi chú</label>
+    <input name="note" maxlength="300" placeholder="Vị trí, người phụ trách…">
+    <label class="check"><input type="checkbox" name="enabled" checked> Đang giám sát</label>
+    <div class="err" id="dErr"></div>
+    <div class="actions">
+      <button type="button" class="danger left" id="dDelete" hidden>Xoá</button>
+      <button type="button" class="ghost" data-close>Huỷ</button>
+      <button type="submit" class="primary">Lưu</button>
+    </div>
+  </form>
+</div>
+<datalist id="groups"></datalist>
+
+<!-- ===== Nhap danh sach ===== -->
+<div class="modal" id="mImport" hidden>
+  <form class="box wide" id="fImport">
+    <h3>Nhập danh sách thiết bị</h3>
+    <div class="hint" data-i18n="importHint">Mỗi dòng một thiết bị: <code>Tên, IP, Nhóm, Loại, Cổng/URL/Tên miền</code> — chỉ cần <code>Tên, IP</code> (mặc định Ping).<br>
+      Có thể dán thẳng từ Excel, hoặc <b>dán nguyên kết quả quét mạng</b> dạng <code>192.168.1.21  2 ms  SRV-APP-01</code> (tự lấy hostname làm tên).</div>
+    <textarea name="text" data-i18n-ph="importPlaceholder" placeholder="Switch lõi, 192.168.1.2, Lõi mạng
+Firewall, 192.168.1.3, Lõi mạng
+Web nội bộ, 192.168.1.20, Máy chủ, http, https://192.168.1.20/
+Remote Desktop, 192.168.1.21, Máy chủ, tcp, 3389
+DNS nội bộ, 192.168.1.5, Máy chủ, dns, example.local
+192.168.1.50	2 ms	PRINTER-T1"></textarea>
+    <div class="row2">
+      <div><label>Nhóm mặc định (cho dòng không ghi nhóm)</label><input name="grp" list="groups" maxlength="60"></div>
+      <div></div>
+    </div>
+    <label class="check warnbox"><input type="checkbox" name="replace"> <span data-i18n="importReplace"><b>Xoá toàn bộ thiết bị hiện có</b> rồi mới nhập danh sách này (thay thế)</span></label>
+    <div class="err" id="iErr"></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>Đóng</button>
+      <button type="submit" class="primary" id="iSubmit">Nhập</button>
+    </div>
+  </form>
+</div>
+
+<!-- ===== Dang nhap ===== -->
+<div class="modal" id="mLogin" hidden>
+  <form class="box" id="fLogin">
+    <h3>Đăng nhập quản trị</h3>
+    <div class="hint" data-i18n="loginHint">Để thêm, sửa, xoá thiết bị. Ai cũng xem và nghe cảnh báo được mà không cần đăng nhập.</div>
+    <label>Mật khẩu</label>
+    <input type="password" name="password" autocomplete="current-password">
+    <div class="err" id="lErr"></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>Huỷ</button>
+      <button type="submit" class="primary">Đăng nhập</button>
+    </div>
+  </form>
+</div>
+
+<!-- ===== Cai dat may chu ===== -->
+<div class="modal" id="mSettings" hidden>
+  <form class="box" id="fSettings">
+    <h3>Cài đặt giám sát</h3>
+    <label>Tiêu đề trang</label><input name="title" maxlength="80">
+    <div class="row2">
+      <div><label>Chu kỳ kiểm tra (giây)</label><input name="interval" type="number" min="5" max="3600"></div>
+      <div><label>Thời gian chờ (giây)</label><input name="timeout" type="number" min="1" max="30"></div>
+    </div>
+    <div class="row2">
+      <div><label>Lỗi liên tiếp → báo mất kết nối</label><input name="fail_threshold" type="number" min="1" max="20"></div>
+      <div><label>Thành công liên tiếp → báo kết nối lại</label><input name="ok_threshold" type="number" min="1" max="20"></div>
+    </div>
+    <div class="hint" id="sHint"></div>
+    <div class="danger-zone">
+      <p data-i18n="dangerZone">Xoá <b>toàn bộ</b> thiết bị đang giám sát (nhật ký sự kiện vẫn được giữ).</p>
+      <button type="button" class="danger" id="btnDeleteAll">🗑 Xoá tất cả thiết bị…</button>
+    </div>
+    <div class="err" id="sErr"></div>
+    <div class="actions">
+      <button type="button" class="ghost left" id="btnLogout">Đăng xuất</button>
+      <button type="button" class="ghost" data-close>Huỷ</button>
+      <button type="submit" class="primary">Lưu</button>
+    </div>
+  </form>
+</div>
+
+<!-- ===== Xac nhan xoa ===== -->
+<div class="modal" id="mConfirm" hidden>
+  <form class="box" id="fConfirm">
+    <h3 id="cTitle">Xác nhận</h3>
+    <div id="cBody" class="hint" style="font-size:14px;color:var(--text)"></div>
+    <div id="cTypeWrap"><label data-i18n="confirmWord">Gõ <b>XOA</b> để xác nhận</label><input name="word" autocomplete="off"></div>
+    <div class="err" id="cErr"></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>Huỷ</button>
+      <button type="submit" class="danger solid" id="cOk">Xoá</button>
+    </div>
+  </form>
+</div>
+
+<!-- ===== Chuyen nhom ===== -->
+<div class="modal" id="mGroup" hidden>
+  <form class="box" id="fGroupMove">
+    <h3>Chuyển nhóm</h3>
+    <div class="hint" id="gHint"></div>
+    <label>Nhóm mới (để trống = bỏ nhóm)</label><input name="grp" list="groups" maxlength="60">
+    <div class="err" id="gErr"></div>
+    <div class="actions">
+      <button type="button" class="ghost" data-close>Huỷ</button>
+      <button type="submit" class="primary">Chuyển</button>
+    </div>
+  </form>
+</div>
+
+<!-- ===== Am thanh (luu tren trinh duyet nay) ===== -->
+<div class="modal" id="mSound" hidden>
+  <div class="box wide">
+    <h3>Âm thanh thông báo</h3>
+    <div class="hint" data-i18n="soundHint">Cài đặt lưu riêng trên trình duyệt này. Âm thanh phát khi thiết bị đổi trạng thái.</div>
+
+    <h4 style="color:var(--down)">Khi mất kết nối</h4>
+    <label class="check"><input type="checkbox" id="snDown"> Phát âm thanh</label>
+    <div class="row2">
+      <div><label>Kiểu âm</label>
+        <div class="pick"><select id="snDownPreset"></select><button type="button" class="sm" id="snTestDown" title="Nghe thử">▶</button></div></div>
+      <div><label>Số lần lặp</label>
+        <select id="snDownRepeat"><option value="1">1 lần</option><option value="2">2 lần</option><option value="3">3 lần</option><option value="5">5 lần</option></select></div>
+    </div>
+    <div class="filebox" id="fbDown" hidden><input type="file" accept="audio/*" id="snDownFile"><span id="snDownFileName"></span></div>
+
+    <h4 style="color:var(--up)">Khi kết nối lại</h4>
+    <label class="check"><input type="checkbox" id="snUp"> Phát âm thanh</label>
+    <div class="row2">
+      <div><label>Kiểu âm</label>
+        <div class="pick"><select id="snUpPreset"></select><button type="button" class="sm" id="snTestUp" title="Nghe thử">▶</button></div></div>
+      <div><label>Số lần lặp</label>
+        <select id="snUpRepeat"><option value="1">1 lần</option><option value="2">2 lần</option><option value="3">3 lần</option></select></div>
+    </div>
+    <div class="filebox" id="fbUp" hidden><input type="file" accept="audio/*" id="snUpFile"><span id="snUpFileName"></span></div>
+
+    <h4>Giọng nói</h4>
+    <label class="check"><input type="checkbox" id="snSpeak"> Đọc tên thiết bị bằng giọng nói</label>
+    <label>Giọng đọc</label>
+    <select id="snVoice"></select>
+    <div class="hint" id="snVoiceHint"></div>
+
+    <h4>Chung</h4>
+    <label>Âm lượng</label>
+    <input type="range" id="snVol" min="0" max="100">
+    <label>Nhắc lại khi vẫn còn thiết bị mất kết nối</label>
+    <select id="snRemind">
+      <option value="0">Không nhắc lại (chỉ báo khi đổi trạng thái)</option>
+      <option value="1">Mỗi 1 phút</option><option value="5">Mỗi 5 phút</option>
+      <option value="10">Mỗi 10 phút</option><option value="30">Mỗi 30 phút</option>
+    </select>
+    <div class="err" id="snErr"></div>
+    <div class="actions">
+      <button type="button" class="left" id="snTestAll">▶ Thử cả âm + giọng đọc</button>
+      <button type="button" class="primary" data-close>Xong</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   Ngon ngu / Language: tieng Viet (mac dinh) va English.
+   Chuoi goc tieng Viet la "khoa"; EN la ban dich. Thieu ban dich -> giu tieng Viet.
+   ===================================================================== */
+const LANG = (() => {
+  try {
+    const q = new URLSearchParams(location.search).get("lang");
+    if (q === "en" || q === "vi") { localStorage.setItem("pm.lang", JSON.stringify(q)); return q; }
+    return JSON.parse(localStorage.getItem("pm.lang")) || "vi";
+  } catch (e) { return "vi"; }
+})();
+document.documentElement.lang = LANG;
+
+const EN = {
+  // ---- tieu de / thanh tren
+  "Giám sát mạng nội bộ": "Internal Network Monitor",
+  "Tổng": "Total", "Hoạt động": "Up", "Mất kết nối": "Down", "Chờ / tạm dừng": "Pending / paused",
+  "Đang kết nối…": "Connecting…", "Trực tuyến": "Online", "Mất kết nối máy chủ": "Server unreachable",
+  "Đổi giao diện ngày / đêm": "Switch day / night theme", "Cài đặt âm thanh trên máy này": "Sound settings on this computer",
+  "🔊 Âm thanh": "🔊 Sound", "🔇 Đang tắt tiếng": "🔇 Muted", "Đăng nhập quản trị": "Admin login", "⚙ Cài đặt": "⚙ Settings",
+  "🌙 Đêm": "🌙 Night", "☀ Ngày": "☀ Day", "🕒 Tự động": "🕒 Auto",
+  "Tự động: Ngày 6:00–18:00, Đêm 18:00–6:00. Bấm để đổi.": "Auto: Day 6:00–18:00, Night 18:00–6:00. Click to change.",
+  "Bấm để đổi giao diện": "Click to change theme",
+  "⚠ MẤT KẾT NỐI TỚI MÁY CHỦ GIÁM SÁT – trạng thái trên màn hình có thể đã cũ": "⚠ LOST CONNECTION TO MONITORING SERVER – the status on screen may be outdated",
+  "MẤT KẾT NỐI:": "DOWN:",
+  // ---- mo khoa am thanh
+  "🔊 Bấm để bật âm thanh thông báo": "🔊 Click to enable sound alerts", "Xem không cần âm thanh": "View without sound",
+  // ---- thanh cong cu
+  "Tìm tên, IP, nhóm, ghi chú…": "Search name, IP, group, note…", "Tất cả nhóm": "All groups", "Kiểu hiển thị": "View mode",
+  "▦ Ô": "▦ Tiles", "☰ Danh sách": "☰ List", "Cỡ ô": "Tile size", "Ô nhỏ": "Small tiles", "Ô vừa": "Medium tiles",
+  "Ô rộng": "Wide tiles", "Ô rất rộng": "Extra-wide tiles", "Ẩn / hiện khung nhật ký sự kiện": "Show / hide event log",
+  "📋 Nhật ký": "📋 Log", "☑ Chọn nhiều": "☑ Select", "Nhập danh sách": "Import list", "Xuất CSV": "Export CSV",
+  "+ Thêm thiết bị": "+ Add device",
+  "Đang hiện nhật ký – bấm để ẩn": "Log shown – click to hide", "Đang ẩn nhật ký – bấm để hiện": "Log hidden – click to show",
+  // ---- chon nhieu
+  "Đã chọn {0}": "{0} selected", "Chọn tất cả đang hiển thị": "Select all visible", "Chọn thiết bị mất kết nối": "Select down devices",
+  "Bỏ chọn": "Clear selection", "⏸ Tạm dừng": "⏸ Pause", "▶ Tiếp tục": "▶ Resume", "Chuyển nhóm…": "Move to group…",
+  "🗑 Xoá đã chọn": "🗑 Delete selected", "Xong": "Done", "chọn cả nhóm ({0})": "select group ({0})",
+  "Đã cập nhật {0} thiết bị": "Updated {0} device(s)", "Chuyển {0} thiết bị đã chọn sang nhóm:": "Move {0} selected device(s) to group:",
+  "Xoá {0} thiết bị?": "Delete {0} device(s)?", "… và {0} thiết bị khác": "… and {0} more",
+  "Đã xoá {0} thiết bị": "Deleted {0} device(s)", "Xoá tất cả {0} thiết bị?": "Delete all {0} devices?",
+  "Toàn bộ danh sách giám sát sẽ bị xoá. Không thể hoàn tác (nên bấm <b>Xuất CSV</b> để lưu lại trước).":
+    "The whole monitoring list will be deleted. This cannot be undone (use <b>Export CSV</b> to keep a copy first).",
+  "Gõ đúng chữ XOA để xác nhận": "Type DELETE exactly to confirm",
+  // ---- nhat ky
+  "Nhật ký sự kiện": "Event log", "Kéo để chỉnh độ rộng khung nhật ký (bấm đúp: về mặc định)": "Drag to resize the log panel (double-click: reset)",
+  "Chữ nhỏ hơn": "Smaller text", "Chữ to hơn": "Larger text", "Thu hẹp khung": "Narrower", "Hẹp": "Narrow",
+  "Mở rộng khung": "Wider", "Rộng": "Wide", "Ẩn nhật ký": "Hide log", "chỉ hiện mất / kết nối lại": "only down / up",
+  "Chưa có sự kiện": "No events yet",
+  "MẤT KẾT NỐI": "DOWN", "KẾT NỐI LẠI": "UP", "THÊM": "ADDED", "SỬA": "EDITED", "XOÁ": "DELETED",
+  "TẠM DỪNG": "PAUSED", "TIẾP TỤC": "RESUMED", "NHẬP": "IMPORTED",
+  // ---- o thiet bi / bang
+  "Đang kiểm tra…": "Checking…", "Tạm dừng": "Paused", "Đang mất kết nối": "Currently down", "Chưa phân nhóm": "Ungrouped",
+  "ổn định {0}": "stable {0}", " · mất {0}%": " · {0}% loss", "từ {0}": "since {0}", "Sửa thiết bị": "Edit device",
+  "Trạng thái": "Status", "Tên thiết bị": "Device name", "Địa chỉ": "Address", "Nhóm": "Group", "Loại": "Type",
+  "Độ trễ": "Latency", "Thời gian": "Duration", "Mất gói": "Loss", "Sửa": "Edit",
+  "Không có thiết bị nào khớp bộ lọc.": "No devices match the filter.",
+  "Chưa có thiết bị. Bấm <b>+ Thêm thiết bị</b> hoặc <b>Nhập danh sách</b>.": "No devices yet. Click <b>+ Add device</b> or <b>Import list</b>.",
+  "Chưa có thiết bị. Đăng nhập quản trị để thêm thiết bị.": "No devices yet. Log in as admin to add devices.",
+  "{0} ngày": "{0}d",
+  // ---- thong bao
+  "Mất kết nối: ": "Down: ", "Đã kết nối lại: ": "Back up: ", "{0} thiết bị": "{0} devices",
+  "Đã kết nối lại tới máy chủ giám sát": "Reconnected to the monitoring server",
+  "Mất kết nối tới máy chủ giám sát": "Lost connection to the monitoring server",
+  "Kiểm tra mạng hoặc máy chủ giám sát": "Check the network or the monitoring server",
+  "{0} mất kết nối – ": "{0} down – ", "Đã đăng nhập quản trị": "Logged in as admin", "Lỗi {0}": "Error {0}",
+  // ---- hop thoai thiet bi
+  "Thêm thiết bị": "Add device", "VD: Switch tầng 3": "e.g. Floor 3 switch", "Loại kiểm tra": "Check type",
+  "Ping (ICMP)": "Ping (ICMP)", "Cổng TCP": "TCP port", "Web HTTP(S)": "Web HTTP(S)", "Máy chủ DNS": "DNS server",
+  "VD: Tầng 3": "e.g. Floor 3", "Địa chỉ IP / tên máy": "IP address / hostname", "Địa chỉ máy chủ DNS": "DNS server address",
+  "Địa chỉ IP / tên máy (tự lấy từ URL nếu để trống)": "IP address / hostname (taken from URL if empty)",
+  "Cổng": "Port", "VD: 3389": "e.g. 3389", "Tên miền cần phân giải": "Domain to resolve", "VD: example.local": "e.g. example.local",
+  "VD: 192.168.1.1": "e.g. 192.168.1.1", "Ghi chú": "Note", "Vị trí, người phụ trách…": "Location, person in charge…",
+  "Đang giám sát": "Monitoring enabled", "Xoá": "Delete", "Huỷ": "Cancel", "Lưu": "Save", "Xoá thiết bị \"{0}\"?": "Delete device \"{0}\"?",
+  // ---- nhap danh sach
+  "Nhập danh sách thiết bị": "Import device list", "Nhóm mặc định (cho dòng không ghi nhóm)": "Default group (for lines without a group)",
+  "Đóng": "Close", "Nhập": "Import", "Xoá cũ & nhập mới": "Replace & import",
+  "Xoá toàn bộ {0} thiết bị hiện có rồi nhập danh sách mới?\n(Nếu danh sách mới không có dòng hợp lệ thì danh sách cũ được giữ nguyên.)":
+    "Delete all {0} existing devices and import the new list?\n(If the new list has no valid line, the old list is kept.)",
+  "Đã xoá {0} thiết bị cũ. ": "Deleted {0} old device(s). ", "Đã thêm {0} thiết bị.": "Added {0} device(s).",
+  // ---- dang nhap / cai dat
+  "Mật khẩu": "Password", "Đăng nhập": "Log in", "Cài đặt giám sát": "Monitoring settings", "Tiêu đề trang": "Page title",
+  "Chu kỳ kiểm tra (giây)": "Check interval (seconds)", "Thời gian chờ (giây)": "Timeout (seconds)",
+  "Lỗi liên tiếp → báo mất kết nối": "Consecutive failures → report down", "Thành công liên tiếp → báo kết nối lại": "Consecutive successes → report up",
+  "Thiết bị sẽ bị báo mất kết nối sau khoảng {0} giây không phản hồi.": "A device is reported down after about {0} seconds without response.",
+  "🗑 Xoá tất cả thiết bị…": "🗑 Delete all devices…", "Đăng xuất": "Log out", "Xác nhận": "Confirm",
+  "Chuyển nhóm": "Move to group", "Nhóm mới (để trống = bỏ nhóm)": "New group (empty = no group)", "Chuyển": "Move",
+  // ---- am thanh
+  "Âm thanh thông báo": "Sound alerts", "Khi mất kết nối": "When a device goes down", "Khi kết nối lại": "When a device comes back up",
+  "Phát âm thanh": "Play sound", "Kiểu âm": "Sound", "Nghe thử": "Preview", "Số lần lặp": "Repeat",
+  "1 lần": "1 time", "2 lần": "2 times", "3 lần": "3 times", "5 lần": "5 times",
+  "Giọng nói": "Voice", "Đọc tên thiết bị bằng giọng nói": "Read device names aloud", "Giọng đọc": "Voice",
+  "Chung": "General", "Âm lượng": "Volume", "Nhắc lại khi vẫn còn thiết bị mất kết nối": "Remind while devices are still down",
+  "Không nhắc lại (chỉ báo khi đổi trạng thái)": "No reminder (only on state change)",
+  "Mỗi 1 phút": "Every 1 minute", "Mỗi 5 phút": "Every 5 minutes", "Mỗi 10 phút": "Every 10 minutes", "Mỗi 30 phút": "Every 30 minutes",
+  "▶ Thử cả âm + giọng đọc": "▶ Test sound + voice", "Đang dùng: ": "Using: ", "Chưa chọn tệp": "No file selected",
+  "Tệp quá lớn (tối đa 1,5 MB). Hãy cắt ngắn hoặc chọn mp3 nhẹ hơn.": "File too large (max 1.5 MB). Trim it or use a smaller mp3.",
+  "Trình duyệt không cho lưu tệp (bộ nhớ đầy hoặc bị chặn).": "The browser cannot store the file (storage full or blocked).",
+  "Tự chọn giọng tiếng Việt": "Auto-select English voice", "Switch tầng 3": "Floor 3 switch",
+  "Tít-tút cảnh báo (mặc định)": "Hi-lo alert (default)", "Còi hú (lên xuống)": "Siren (wail)", "Còi cảnh sát (nhanh)": "Police siren (yelp)",
+  "Còi cứu thương (2 tông)": "Ambulance (two-tone)", "Chuông báo động (bíp nhanh)": "Alarm (fast beeps)", "Chuông báo cháy (reng)": "Fire bell",
+  "Còi Klaxon (trầm, mạnh)": "Klaxon (deep)", "Còi buzzer (rè)": "Buzzer", "Bíp 3 nhịp cao": "Triple high beep",
+  "Nốt đi xuống (báo lỗi)": "Descending notes (error)", "Sonar (ping vang)": "Sonar ping", "Nhịp tim gấp": "Racing heartbeat",
+  "Cồng (trầm vang)": "Gong", "Tệp âm thanh riêng…": "Custom sound file…",
+  "Chuông đi lên (mặc định)": "Rising chime (default)", "Ding-dong": "Ding-dong", "Mộc cầm (xylophone)": "Xylophone",
+  "Hợp âm trưởng": "Major chord", "Ta-da": "Ta-da", "Bíp đôi nhẹ": "Soft double beep", "Chuông nhỏ": "Small bell",
+  "Marimba": "Marimba", "Nhẹ nhàng (2 nốt)": "Gentle (2 notes)",
+  // ---- o lich su
+  "Đang tải nhật ký…": "Loading history…", "Không tải được nhật ký": "Could not load history",
+  "{0} lần mất": "{0} outage(s)", "tổng {0} · ": "total {0} · ", "{0}% hoạt động": "{0}% uptime",
+  "MẤT KẾT NỐI từ {0} ({1})": "DOWN since {0} ({1})", "Hoạt động liên tục {0} (từ {1})": "Up for {0} (since {1})",
+  "Đang tạm dừng giám sát": "Monitoring paused", "đang diễn ra · {0}": "ongoing · {0}", "kéo dài {0}": "lasted {0}",
+  "24 giờ qua": "Last 24 hours", "7 ngày qua": "Last 7 days", "30 ngày qua": "Last 30 days", "Chưa có sự kiện nào": "No events yet",
+  "60 sự kiện gần nhất": "Latest 60 events", "{0} sự kiện": "{0} events",
+  "Bấm ra ngoài / Esc để đóng": "Click outside / Esc to close", "Bấm vào tên để ghim": "Click the name to pin",
+  // ---- ngon ngu
+  "🌐 English": "🌐 Tiếng Việt", "Chuyển sang tiếng Anh": "Switch to Vietnamese",
+};
+
+// Doan HTML co dinh dang (dich ca khoi)
+const EN_HTML = {
+  unlock: 'The browser needs one click to allow sound. A duty PC running Chrome with <code>--autoplay-policy=no-user-gesture-required</code> skips this step.',
+  importHint: 'One device per line: <code>Name, IP, Group, Type, Port/URL/Domain</code> — only <code>Name, IP</code> is required (Ping by default).<br>' +
+              'You can paste straight from Excel, or <b>paste raw network-scan output</b> like <code>192.168.1.21  2 ms  SRV-APP-01</code> (the hostname becomes the name).',
+  importReplace: '<b>Delete all existing devices</b> before importing this list (replace)',
+  loginHint: 'Needed to add, edit or delete devices. Everyone can view and hear alerts without logging in.',
+  dangerZone: 'Delete <b>all</b> monitored devices (the event log is kept).',
+  confirmWord: 'Type <b>DELETE</b> to confirm',
+  soundHint: 'Settings are stored in this browser only. Sounds play when a device changes state.',
+  importPlaceholder: 'Core switch, 192.168.1.2, Core\nFirewall, 192.168.1.3, Core\nIntranet web, 192.168.1.20, Servers, http, https://192.168.1.20/\nRemote Desktop, 192.168.1.21, Servers, tcp, 3389\nInternal DNS, 192.168.1.5, Servers, dns, example.local\n192.168.1.50\t2 ms\tPRINTER-T1',
+};
+
+// Dich: t("chuoi goc {0}", gia_tri...)
+function t(s, ...args) {
+  let r = LANG === "en" && Object.prototype.hasOwnProperty.call(EN, s) ? EN[s] : s;
+  args.forEach((a, i) => { r = r.split("{" + i + "}").join(a); });
+  return r;
+}
+
+// Dich thong bao do may chu tra ve (loi kiem tra, loi API, ten su kien gop)
+const SRV_EN = [
+  [/^Hết thời gian chờ$/, "Timed out"], [/^Máy chủ thiếu lệnh ping$/, "Server has no ping command"],
+  [/^Không phân giải được tên$/, "Cannot resolve name"], [/^Không có quyền gửi ICMP \(thiếu NET_RAW\)$/, "No permission to send ICMP (missing NET_RAW)"],
+  [/^Không tới được đích \(unreachable\)$/, "Destination unreachable"], [/^Không phản hồi ping$/, "No ping reply"],
+  [/^Cổng (\d+): hết thời gian chờ$/, "Port $1: timed out"], [/^Cổng (\d+) đóng \(từ chối kết nối\)$/, "Port $1 closed (connection refused)"],
+  [/^Cổng (\d+): (.*)$/, "Port $1: $2"],
+  [/^HTTP: hết thời gian chờ$/, "HTTP: timed out"], [/^HTTP: từ chối kết nối$/, "HTTP: connection refused"],
+  [/^HTTP (\d+) \(lỗi máy chủ\)$/, "HTTP $1 (server error)"],
+  [/^Tên miền cần phân giải không hợp lệ$/, "Invalid domain to resolve"], [/^DNS: không phản hồi$/, "DNS: no response"],
+  [/^DNS: phản hồi lỗi$/, "DNS: malformed response"], [/^DNS: phản hồi sai mã$/, "DNS: response ID mismatch"],
+  [/^DNS: (.+) không có bản ghi A$/, "DNS: $1 has no A record"], [/^DNS: (.+) không tồn tại \(NXDOMAIN\)$/, "DNS: $1 does not exist (NXDOMAIN)"],
+  [/^DNS: lỗi máy chủ \(SERVFAIL\)$/, "DNS: server failure (SERVFAIL)"], [/^DNS: từ chối truy vấn \(REFUSED\)$/, "DNS: query refused (REFUSED)"],
+  [/^DNS: lỗi rcode=(\d+)$/, "DNS: error rcode=$1"], [/^Lỗi kiểm tra: (.*)$/, "Check error: $1"],
+  [/^(\d+) thiết bị \(thay thế (\d+) cũ\)$/, "$1 devices (replaced $2 old)"], [/^(\d+) thiết bị → nhóm (.*)$/, "$1 devices → group $2"],
+  [/^(\d+) thiết bị$/, "$1 devices"], [/\(trống\)/g, "(none)"],
+  [/^Cần đăng nhập quản trị$/, "Admin login required"], [/^Sai mật khẩu$/, "Wrong password"],
+  [/^Không tìm thấy thiết bị$/, "Device not found"], [/^Không tìm thấy$/, "Not found"],
+  [/^Chưa nhập địa chỉ IP \/ tên máy$/, "Please enter an IP address / hostname"], [/^Địa chỉ không hợp lệ: (.*)$/, "Invalid address: $1"],
+  [/^Cổng phải từ 1 đến 65535$/, "Port must be 1–65535"], [/^Kiểm tra cổng TCP cần nhập số cổng$/, "A TCP check needs a port number"],
+  [/^URL phải bắt đầu bằng http:\/\/ hoặc https:\/\/$/, "URL must start with http:// or https://"],
+  [/^Kiểm tra DNS cần nhập tên miền cần phân giải$/, "A DNS check needs a domain to resolve"],
+  [/^Loại kiểm tra không hợp lệ$/, "Invalid check type"], [/^Không có thiết bị nào được xoá$/, "No device was deleted"],
+  [/^Thao tác không hợp lệ$/, "Invalid action"],
+  [/^Không có dòng hợp lệ nào để nhập – danh sách cũ được giữ nguyên$/, "No valid lines to import – the old list was kept"],
+  [/^Không có dòng hợp lệ nào để nhập$/, "No valid lines to import"],
+  [/^Dòng (\d+): (.+) đã có, bỏ qua$/, "Line $1: $2 already exists, skipped"], [/^Dòng (\d+): (.*)$/, (m, a, b) => `Line ${a}: ${trMsg(b)}`],
+  [/^Giá trị (\w+) không hợp lệ$/, "Invalid value for $1"], [/^(\w+) phải từ (\d+) đến (\d+)$/, "$1 must be between $2 and $3"],
+  [/^Dữ liệu không hợp lệ$/, "Invalid data"], [/^Cần JSON$/, "JSON required"], [/^Dữ liệu quá lớn$/, "Data too large"],
+  [/^Lỗi máy chủ: (.*)$/, "Server error: $1"],
+];
+function trMsg(s) {
+  if (LANG !== "en" || !s) return s || "";
+  for (const [re, rep] of SRV_EN) if (re.test(s)) return s.replace(re, rep);
+  return s;
+}
+
+// Dich phan HTML tinh mot lan khi tai trang
+function translateStatic() {
+  if (LANG !== "en") return;
+  document.title = t(document.title);
+  document.querySelectorAll("[data-i18n]").forEach(el => { const h = EN_HTML[el.dataset.i18n]; if (h) el.innerHTML = h; });
+  document.querySelectorAll("[placeholder]").forEach(el => {
+    const k = el.dataset.i18nPh; el.placeholder = k && EN_HTML[k] ? EN_HTML[k] : t(el.placeholder); });
+  document.querySelectorAll("[title]").forEach(el => el.title = t(el.title));
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode: n => n.parentElement.closest("script,style,textarea,[data-i18n]") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT });
+  const nodes = []; while (w.nextNode()) nodes.push(w.currentNode);
+  nodes.forEach(n => {
+    const raw = n.nodeValue, k = raw.trim();
+    if (k && EN[k] !== undefined) n.nodeValue = raw.replace(k, EN[k]);
+  });
+}
+</script>
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const POLL_MS = 2000, LOST_MS = 15000;
+  const TYPE_LABEL = { ping: "PING", tcp: "TCP", http: "HTTP", dns: "DNS" };
+  const EV_LABEL = { down: t("MẤT KẾT NỐI"), up: t("KẾT NỐI LẠI"), add: t("THÊM"), edit: t("SỬA"), delete: t("XOÁ"),
+                     pause: t("TẠM DỪNG"), resume: t("TIẾP TỤC"), import: t("NHẬP") };
+
+  let S = null, lastEv = null, events = [], skew = 0, lastOk = Date.now(), lost = false;
+  let filter = "all", flashUntil = {}, lastRemind = Date.now();
+  let selecting = false; const picked = new Set(); let visibleIds = [];
+
+  // ------------------------------------------------------------ luu cai dat tren trinh duyet (co the bi chan)
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("pm." + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem("pm." + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
+  };
+  const snd = {
+    down: store.get("down", true), up: store.get("up", true), speak: store.get("speak", true),
+    voice: store.get("voice", ""), vol: store.get("vol", 80), remind: store.get("remind", 0),
+    downPreset: store.get("downPreset", "titut"), upPreset: store.get("upPreset", "chime"),
+    downRepeat: store.get("downRepeat", 1), upRepeat: store.get("upRepeat", 1),
+  };
+  const ui = { view: store.get("view", "tile"), tileW: store.get("tileW", 230) };
+  let soundOff = false;
+
+  // ------------------------------------------------------------ bo may am thanh (WebAudio, khong can file)
+  let ctx = null, master = null;
+  function audio() {
+    if (!ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      ctx = new AC(); master = ctx.createGain(); master.connect(ctx.destination);
+    }
+    if (ctx.state === "suspended") ctx.resume();
+    master.gain.value = snd.vol / 100;
+    return ctx;
+  }
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  // not phang (bip, coi)
+  function tone(f, at, dur, type = "sine", vol = 0.4) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type; o.frequency.value = f;
+    g.gain.setValueAtTime(0, at);
+    g.gain.linearRampToValueAtTime(vol, at + 0.012);
+    g.gain.setValueAtTime(vol, Math.max(at + 0.013, at + dur - 0.04));
+    g.gain.linearRampToValueAtTime(0, at + dur);
+    o.connect(g).connect(master); o.start(at); o.stop(at + dur + 0.05);
+    return o;
+  }
+  // not tat dan (chuong, dan)
+  function pluck(f, at, dur, type = "sine", vol = 0.5, harm = 0) {
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, at);
+    g.gain.linearRampToValueAtTime(vol, at + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0008, at + dur);
+    g.connect(master);
+    [[f, 1], ...(harm ? [[f * 2.76, 0.35], [f * 5.4, 0.15]] : [])].forEach(([fr, a]) => {
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = type; o.frequency.value = fr; og.gain.value = a;
+      o.connect(og).connect(g); o.start(at); o.stop(at + dur + 0.05);
+    });
+  }
+  // quet tan so (coi hu)
+  function sweep(f1, f2, at, dur, type = "sawtooth", vol = 0.25) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f1, at); o.frequency.linearRampToValueAtTime(f2, at + dur);
+    g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(vol, at + 0.03);
+    g.gain.setValueAtTime(vol, at + dur - 0.05); g.gain.linearRampToValueAtTime(0, at + dur);
+    o.connect(g).connect(master); o.start(at); o.stop(at + dur + 0.05);
+  }
+
+  // Moi kieu am: ham(t = thoi diem bat dau) -> tra ve do dai (giay)
+  const DOWN_SOUNDS = {
+    titut:    ["Tít-tút cảnh báo (mặc định)", t => { for (let i = 0; i < 3; i++) { tone(988, t + i * .5, .2, "square", .3); tone(659, t + i * .5 + .23, .2, "square", .3); } return 1.5; }],
+    siren:    ["Còi hú (lên xuống)", t => { for (let i = 0; i < 2; i++) { sweep(500, 1300, t + i * 1.2, .6); sweep(1300, 500, t + i * 1.2 + .6, .6); } return 2.4; }],
+    police:   ["Còi cảnh sát (nhanh)", t => { for (let i = 0; i < 8; i++) sweep(i % 2 ? 1500 : 700, i % 2 ? 700 : 1500, t + i * .25, .25, "sawtooth", .22); return 2; }],
+    ambulance:["Còi cứu thương (2 tông)", t => { for (let i = 0; i < 4; i++) { tone(960, t + i * .9, .45, "sawtooth", .22); tone(770, t + i * .9 + .45, .45, "sawtooth", .22); } return 3.6; }],
+    alarm:    ["Chuông báo động (bíp nhanh)", t => { for (let i = 0; i < 10; i++) tone(1046, t + i * .15, .09, "square", .3); return 1.5; }],
+    fire:     ["Chuông báo cháy (reng)", t => { for (let i = 0; i < 40; i++) pluck(1250 + (i % 2) * 30, t + i * .045, .06, "square", .18); return 1.9; }],
+    klaxon:   ["Còi Klaxon (trầm, mạnh)", t => { for (let i = 0; i < 3; i++) { sweep(180, 420, t + i * .8, .55, "sawtooth", .35); } return 2.4; }],
+    buzzer:   ["Còi buzzer (rè)", t => { tone(190, t, .55, "square", .35); tone(190, t + .75, .55, "square", .35); return 1.3; }],
+    triple:   ["Bíp 3 nhịp cao", t => { [0, .22, .44].forEach(d => tone(1760, t + d, .12, "sine", .45)); return .7; }],
+    descend:  ["Nốt đi xuống (báo lỗi)", t => { [880, 784, 659, 523, 392].forEach((f, i) => tone(f, t + i * .14, .16, "triangle", .5)); return .9; }],
+    sonar:    ["Sonar (ping vang)", t => { pluck(1400, t, 1.2, "sine", .6); pluck(1400, t + .55, .9, "sine", .25); return 1.6; }],
+    heartbeat:["Nhịp tim gấp", t => { for (let i = 0; i < 3; i++) { tone(70, t + i * .7, .12, "sine", .9); tone(65, t + i * .7 + .18, .14, "sine", .8); } return 2.1; }],
+    gong:     ["Cồng (trầm vang)", t => { pluck(196, t, 2.6, "sine", .7, 1); return 2.6; }],
+    custom:   ["Tệp âm thanh riêng…", null],
+  };
+  const UP_SOUNDS = {
+    chime:    ["Chuông đi lên (mặc định)", t => { [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => tone(f, t + i * .13, .22, "sine", .45)); return .75; }],
+    dingdong: ["Ding-dong", t => { pluck(1318.5, t, .9, "sine", .6, 1); pluck(1046.5, t + .4, 1.2, "sine", .6, 1); return 1.6; }],
+    xylo:     ["Mộc cầm (xylophone)", t => { [784, 988, 1175, 1568].forEach((f, i) => pluck(f, t + i * .09, .45, "triangle", .6)); return .8; }],
+    chord:    ["Hợp âm trưởng", t => { [523.25, 659.25, 783.99].forEach(f => pluck(f, t, 1.4, "triangle", .35)); return 1.4; }],
+    tada:     ["Ta-da", t => { pluck(784, t, .2, "sawtooth", .25); [784, 988, 1175].forEach(f => pluck(f, t + .18, 1.1, "sawtooth", .18)); return 1.3; }],
+    twobeep:  ["Bíp đôi nhẹ", t => { tone(1318.5, t, .08, "sine", .4); tone(1318.5, t + .14, .08, "sine", .4); return .3; }],
+    bell:     ["Chuông nhỏ", t => { pluck(2093, t, 1.3, "sine", .45, 1); return 1.3; }],
+    marimba:  ["Marimba", t => { [523.25, 783.99, 659.25, 1046.5].forEach((f, i) => pluck(f, t + i * .12, .5, "sine", .6, 1)); return .9; }],
+    soft:     ["Nhẹ nhàng (2 nốt)", t => { tone(660, t, .18, "sine", .3); tone(880, t + .2, .3, "sine", .3); return .55; }],
+    custom:   ["Tệp âm thanh riêng…", null],
+  };
+
+  // tep am thanh rieng (luu tren trinh duyet nay)
+  function playFile(kind) {
+    const data = store.get("file_" + kind, null);
+    if (!data) return wait(0);
+    return new Promise(res => {
+      const a = new Audio(data.url);
+      a.volume = Math.min(1, snd.vol / 100);
+      a.onended = a.onerror = () => res();
+      a.play().catch(() => res());
+      setTimeout(res, 30000);
+    });
+  }
+  async function playPreset(kind, id, repeat) {
+    const lib = kind === "down" ? DOWN_SOUNDS : UP_SOUNDS;
+    for (let r = 0; r < repeat; r++) {
+      if (id === "custom") { await playFile(kind); continue; }
+      if (!audio()) return;
+      const fn = (lib[id] || lib[kind === "down" ? "titut" : "chime"])[1];
+      const len = fn(ctx.currentTime + 0.05);
+      await wait(len * 1000 + 250);
+    }
+  }
+  const playDown = () => playPreset("down", snd.downPreset, snd.downRepeat);
+  const playUp = () => playPreset("up", snd.upPreset, snd.upRepeat);
+  function playWarn() {
+    if (!audio()) return wait(0);
+    const t = ctx.currentTime + 0.05;
+    tone(440, t, .35, "triangle", .4); tone(440, t + .5, .35, "triangle", .4);
+    return wait(1000);
+  }
+
+  // ------------------------------------------------------------ giong noi (giu nguyen)
+  let voices = [];
+  function loadVoices() {
+    if (!("speechSynthesis" in window)) return;
+    voices = speechSynthesis.getVoices();
+    const re = LANG === "en" ? /^en/i : /^vi/i;
+    const sel = $("snVoice"), vi = voices.filter(v => re.test(v.lang));
+    const list = [...vi, ...voices.filter(v => !re.test(v.lang))];
+    sel.innerHTML = `<option value="">${t("Tự chọn giọng tiếng Việt")}</option>` +
+      list.map(v => `<option value="${esc(v.name)}">${esc(v.name)} (${esc(v.lang)})</option>`).join("");
+    sel.value = snd.voice;
+    $("snVoiceHint").textContent = vi.length ? "" : LANG === "en" ? "This computer has no English voice installed." :
+      "Máy này chưa có giọng tiếng Việt. Windows: Cài đặt → Thời gian và ngôn ngữ → Giọng nói → Thêm giọng nói → Tiếng Việt (Microsoft An), rồi mở lại trình duyệt.";
+  }
+  function pickVoice() {
+    if (snd.voice) return voices.find(v => v.name === snd.voice) || null;
+    return voices.find(v => (LANG === "en" ? /^en/i : /^vi/i).test(v.lang)) || null;
+  }
+  function speak(text) {
+    if (!snd.speak || !("speechSynthesis" in window)) return wait(0);
+    const v = pickVoice();
+    if (!v) return wait(0);
+    return new Promise(res => {
+      const u = new SpeechSynthesisUtterance(text);
+      u.voice = v; u.lang = v.lang; u.rate = 1; u.volume = Math.min(1, snd.vol / 100);
+      u.onend = u.onerror = res;
+      speechSynthesis.speak(u);
+      setTimeout(res, 15000);
+    });
+  }
+
+  let queue = Promise.resolve();
+  const enqueue = fn => { queue = queue.then(fn).catch(() => {}); };
+  const names = list => list.length <= 3 ? list.map(e => e.name).join(", ") : t("{0} thiết bị", list.length);
+  function announce(downs, ups) {
+    if (soundOff) return;
+    if (downs.length && snd.down) enqueue(async () => { await playDown(); await speak(t("Mất kết nối: ") + names(downs)); });
+    if (ups.length && snd.up) enqueue(async () => { await playUp(); await speak(t("Đã kết nối lại: ") + names(ups)); });
+  }
+
+  // ------------------------------------------------------------ tien ich
+  const pad = n => String(n).padStart(2, "0");
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  const nowS = () => Date.now() / 1000 + skew;
+  function dur(sec) {
+    sec = Math.max(0, Math.floor(sec));
+    const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+    if (d) return `${t("{0} ngày", d)} ${pad(h)}:${pad(m)}`;
+    return h ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+  }
+  function fmtTime(ts, br = true) {
+    const d = new Date(ts * 1000), t = new Date();
+    const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    return d.toDateString() === t.toDateString() ? hm : `${hm}${br ? "<br>" : " "}${pad(d.getDate())}/${pad(d.getMonth() + 1)}`;
+  }
+  function toast(kind, title, sub) {
+    const el = document.createElement("div");
+    el.className = "toast " + kind;
+    el.innerHTML = esc(title) + (sub ? `<small>${esc(sub)}</small>` : "");
+    $("toasts").prepend(el);
+    while ($("toasts").children.length > 6) $("toasts").lastChild.remove();
+    setTimeout(() => el.remove(), kind === "down" ? 20000 : 8000);
+  }
+  async function api(path, body) {
+    const r = await fetch("api/" + path, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}), credentials: "same-origin" });
+    let j = {}; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) { const e = new Error(j.error ? trMsg(j.error) : t("Lỗi {0}", r.status)); e.data = j;
+      if (j.errors) j.errors = j.errors.map(trMsg); throw e; }
+    poll();
+    return j;
+  }
+
+  // ------------------------------------------------------------ ve giao dien
+  function devTarget(d) {
+    if (d.type === "tcp") return `${d.host}:${d.port}`;
+    if (d.type === "http") return d.target || d.host;
+    if (d.type === "dns") return `${d.host} → ${d.target}`;
+    return d.host;
+  }
+  const STATE_LABEL = { up: t("Hoạt động"), down: t("MẤT KẾT NỐI"), unknown: t("Đang kiểm tra…"), paused: t("Tạm dừng") };
+  const titleOf = s => s.title === "Giám sát mạng nội bộ" ? t(s.title) : s.title;
+  const ORDER = { down: 0, unknown: 1, up: 2, paused: 3 };
+  const rttText = d => d.rtt == null ? "" : `${d.rtt < 10 ? d.rtt.toFixed(1) : Math.round(d.rtt)} ms`;
+
+  function filtered() {
+    const q = $("q").value.trim().toLowerCase(), g = $("fGroup").value;
+    const list = S.devices.filter(d =>
+      (!g || d.grp === g) &&
+      (filter === "all" || (filter === "other" ? !["up", "down"].includes(d.status) : d.status === filter)) &&
+      (!q || [d.name, d.host, d.note, d.target, d.grp].join(" ").toLowerCase().includes(q)));
+    list.sort((a, b) => (ORDER[a.status] - ORDER[b.status]) || a.grp.localeCompare(b.grp, "vi") || a.name.localeCompare(b.name, "vi", { numeric: true }));
+    return list;
+  }
+
+  function render() {
+    if (!S) return;
+    const now = nowS(), devs = S.devices;
+    const cnt = { up: 0, down: 0, other: 0 };
+    devs.forEach(d => { if (d.status === "up") cnt.up++; else if (d.status === "down") cnt.down++; else cnt.other++; });
+    $("sTotal").textContent = devs.length; $("sUp").textContent = cnt.up;
+    $("sDown").textContent = cnt.down; $("sOther").textContent = cnt.other;
+    $("statDown").classList.toggle("has", cnt.down > 0);
+    document.querySelectorAll(".stat").forEach(s => s.classList.toggle("sel", s.dataset.f === filter && filter !== "all"));
+    $("logo").classList.toggle("bad", cnt.down > 0);
+    $("title").textContent = titleOf(S.settings);
+    document.title = (cnt.down ? "🔴 " + t("{0} mất kết nối – ", cnt.down) : "") + titleOf(S.settings);
+    setFavicon(cnt.down > 0);
+
+    const downs = devs.filter(d => d.status === "down").sort((a, b) => a.since - b.since);
+    $("downbar").hidden = !downs.length;
+    $("downbar").innerHTML = downs.length ? t("MẤT KẾT NỐI:") + downs.map(d =>
+      `<span class="chip" data-id="${d.id}" data-hist="${d.id}">${esc(d.name)} · ${dur(now - d.since)}</span>`).join("") : "";
+
+    const groups = [...new Set(devs.map(d => d.grp).filter(Boolean))].sort((a, b) => a.localeCompare(b, "vi"));
+    const fg = $("fGroup"), cur = fg.value;
+    const opts = `<option value="">${t("Tất cả nhóm")}</option>` + groups.map(g => `<option>${esc(g)}</option>`).join("");
+    if (fg.dataset.o !== opts) { fg.innerHTML = opts; fg.value = cur; fg.dataset.o = opts; }
+    $("groups").innerHTML = groups.map(g => `<option value="${esc(g)}">`).join("");
+
+    // bo chon thiet bi da bi xoa
+    const ids = new Set(devs.map(d => d.id));
+    [...picked].forEach(id => { if (!ids.has(id)) picked.delete(id); });
+
+    const list = filtered();
+    visibleIds = list.map(d => d.id);
+    const grid = $("grid");
+    grid.classList.toggle("selecting", selecting);
+    grid.innerHTML = !list.length ? emptyHtml(devs.length) : (ui.view === "list" ? listHtml(list, now) : tilesHtml(list, now, groups.length > 1 && !$("fGroup").value));
+
+    document.body.classList.toggle("admin", S.admin);
+    ["btnAdd", "btnImport", "btnExport", "btnSettings", "btnSelect"].forEach(id => $(id).hidden = !S.admin);
+    $("btnLogin").hidden = S.admin || !S.auth;
+    $("btnLogout").hidden = !S.auth;
+    if (!S.admin && selecting) setSelecting(false);
+    updSelbar();
+  }
+  function emptyHtml(total) {
+    return `<div class="empty">${total ? t("Không có thiết bị nào khớp bộ lọc.") :
+      (S.admin ? t("Chưa có thiết bị. Bấm <b>+ Thêm thiết bị</b> hoặc <b>Nhập danh sách</b>.") :
+                 t("Chưa có thiết bị. Đăng nhập quản trị để thêm thiết bị."))}</div>`;
+  }
+  function tilesHtml(list, now, showGroups) {
+    if (showGroups) {   // gom theo nhom: khoi "dang mat ket noi" len dau, sau do tung nhom
+      list = list.slice().sort((a, b) => ((a.status === "down") ? 0 : 1) - ((b.status === "down") ? 0 : 1)
+        || (a.status === "down" ? 0 : a.grp.localeCompare(b.grp, "vi"))
+        || (ORDER[a.status] - ORDER[b.status]) || a.name.localeCompare(b.name, "vi", { numeric: true }));
+    }
+    let html = "", lastGroup = null;
+    for (const d of list) {
+      const key = d.status === "down" ? "\u0000down" : (d.grp || "");
+      if (showGroups && key !== lastGroup) {
+        const gIds = list.filter(x => (x.status === "down" ? "\u0000down" : (x.grp || "")) === key).map(x => x.id);
+        html += `<div class="group-title">${key === "\u0000down" ? t("Đang mất kết nối") : esc(d.grp || t("Chưa phân nhóm"))}
+          ${selecting ? `<button class="sm ghost" data-pickgroup="${gIds.join(",")}">${t("chọn cả nhóm ({0})", gIds.length)}</button>` : ""}</div>`;
+        lastGroup = key;
+      }
+      const hist = d.hist.padStart(30, "e").slice(-30);
+      const spark = [...hist].map(c => `<i class="${c === "1" ? "" : c === "0" ? "f" : "e"}"></i>`).join("");
+      const cls = [d.status, flashUntil[d.id] > Date.now() ? "flash" : "", picked.has(d.id) ? "picked" : ""].join(" ");
+      const right = d.status === "up" ? rttText(d) : d.status === "down" ? dur(now - d.since) : "";
+      const sub = d.status === "up" ? t("ổn định {0}", dur(now - d.since)) + (d.loss ? t(" · mất {0}%", d.loss) : "") :
+                  d.status === "down" ? t("từ {0}", fmtTime(d.since, false)) : "";
+      html += `<div class="tile ${cls}" data-id="${d.id}">
+        <div class="t-head">${selecting ? `<input type="checkbox" tabindex="-1" ${picked.has(d.id) ? "checked" : ""}>` : '<span class="dot"></span>'}
+          <span class="t-name"><span data-hist="${d.id}">${esc(d.name)}</span></span><span class="badge">${TYPE_LABEL[d.type]}</span>${S.admin ? `<button class="t-edit" data-edit="${d.id}" title="${t("Sửa thiết bị")}">✎</button>` : ""}</div>
+        <div class="t-host">${esc(devTarget(d))}${d.grp && !showGroups ? " · " + esc(d.grp) : ""}</div>
+        <div class="t-row"><span class="t-state">${STATE_LABEL[d.status]}</span><span class="t-dur">${right}</span></div>
+        <div class="t-row"><span class="t-dur">${sub}</span></div>
+        <div class="spark">${spark}</div>
+        ${d.status === "down" && d.msg ? `<div class="t-msg">${esc(trMsg(d.msg))}</div>` : ""}
+      </div>`;
+    }
+    return html;
+  }
+  function listHtml(list, now) {
+    const allPicked = list.length && list.every(d => picked.has(d.id));
+    return `<div class="tablewrap"><table><thead><tr>
+      ${selecting ? `<th style="width:30px"><input type="checkbox" data-pickall ${allPicked ? "checked" : ""}></th>` : ""}
+      ${["Trạng thái", "Tên thiết bị", "Địa chỉ", "Nhóm", "Loại", "Độ trễ", "Thời gian", "Mất gói"].map(h => `<th>${t(h)}</th>`).join("")}
+      ${S.admin && !selecting ? "<th></th>" : ""}</tr></thead><tbody>` +
+      list.map(d => {
+        const cls = [d.status, flashUntil[d.id] > Date.now() ? "flash" : "", picked.has(d.id) ? "picked" : ""].join(" ");
+        const time = d.status === "up" || d.status === "down" ? dur(now - d.since) : "";
+        return `<tr class="${cls}" data-id="${d.id}">
+          ${selecting ? `<td><input type="checkbox" tabindex="-1" ${picked.has(d.id) ? "checked" : ""}></td>` : ""}
+          <td class="st">${STATE_LABEL[d.status]}</td>
+          <td class="nm"><span data-hist="${d.id}">${esc(d.name)}</span>${d.status === "down" && d.msg ? `<div class="err">${esc(trMsg(d.msg))}</div>` : ""}${d.note ? `<div class="err" style="color:var(--muted)">${esc(d.note)}</div>` : ""}</td>
+          <td>${esc(devTarget(d))}</td><td>${esc(d.grp)}</td><td>${TYPE_LABEL[d.type]}</td>
+          <td class="num">${d.status === "up" ? rttText(d) : ""}</td><td class="num">${time}</td>
+          <td class="num">${d.loss != null && d.status !== "paused" ? d.loss + "%" : ""}</td>
+          ${S.admin && !selecting ? `<td><button class="sm" data-edit="${d.id}">${t("Sửa")}</button></td>` : ""}
+        </tr>`;
+      }).join("") + "</tbody></table></div>";
+  }
+
+  function renderEvents() {
+    const only = $("evOnlyState").checked;
+    const list = events.filter(e => !only || e.kind === "down" || e.kind === "up").slice(-150).reverse();
+    const devIds = new Set(S ? S.devices.map(d => d.id) : []);
+    $("events").innerHTML = list.map(e => {
+      const k = e.kind === "down" || e.kind === "up" ? e.kind : "other";
+      return `<div class="ev${e._new ? " new" : ""}"><time>${fmtTime(e.ts)}</time><div>
+        <span class="k ${k}">${EV_LABEL[e.kind] || e.kind}</span><span class="n"${e.device_id && devIds.has(e.device_id) ? ` data-hist="${e.device_id}"` : ""}>${esc(e.device_id ? e.name : trMsg(e.name))}</span>
+        ${e.host ? `<div class="d">${esc(e.host)}${e.detail ? " · " + esc(trMsg(e.detail)) : ""}</div>` : ""}</div></div>`;
+    }).join("") || `<div class="ev"><span></span><div class="d">${t("Chưa có sự kiện")}</div></div>`;
+    events.forEach(e => delete e._new);
+  }
+
+  let favState = null;
+  function setFavicon(bad) {
+    if (favState === bad) return; favState = bad;
+    const c = bad ? "%23f85149" : "%232ea043";
+    $("favicon").href = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='${c}'/%3E%3C/svg%3E`;
+  }
+
+  // ------------------------------------------------------------ lay du lieu
+  async function poll() {
+    try {
+      const since = lastEv === null ? -1 : lastEv;
+      const r = await fetch("api/state?since=" + since, { cache: "no-store", credentials: "same-origin" });
+      if (!r.ok) throw new Error(r.status);
+      const j = await r.json();
+      skew = j.now - Date.now() / 1000;
+      lastOk = Date.now();
+      if (lost) { lost = false; toast("info", t("Đã kết nối lại tới máy chủ giám sát")); }
+
+      if (lastEv === null || j.last_event_id < lastEv) {
+        events = j.events;
+      } else if (j.events.length) {
+        j.events.forEach(e => { e._new = true; if (e.device_id) delete histCache[e.device_id]; });
+        if (histId && !H.hidden && j.events.some(e => e.device_id === histId)) showHist(histId, histRect);
+        events = events.concat(j.events).slice(-300);
+        const downs = j.events.filter(e => e.kind === "down"), ups = j.events.filter(e => e.kind === "up");
+        downs.forEach(e => { flashUntil[e.device_id] = Date.now() + 8000; toast("down", t("Mất kết nối: ") + e.name, [e.host, trMsg(e.detail)].filter(Boolean).join(" · ")); });
+        ups.forEach(e => { flashUntil[e.device_id] = Date.now() + 8000; toast("up", t("Đã kết nối lại: ") + e.name, e.host); });
+        announce(downs, ups);
+        if (downs.length) lastRemind = Date.now();
+        if (downs.length && document.hidden && "Notification" in window && Notification.permission === "granted") {
+          new Notification(t("Mất kết nối: ") + names(downs), { body: downs.map(e => e.host).join(", ") });
+        }
+      }
+      lastEv = j.last_event_id;
+      S = j;
+      if (!document.querySelector(".modal:not([hidden])")) render();
+      renderEvents();
+    } catch (e) {
+      checkLost();
+    }
+  }
+  function checkLost() {
+    const isLost = Date.now() - lastOk > LOST_MS;
+    $("lostbar").hidden = !isLost;
+    $("conn").className = "conn" + (isLost ? " lost" : "");
+    $("conn").textContent = isLost ? t("Mất kết nối máy chủ") : t("Trực tuyến");
+    if (isLost && !lost) {
+      lost = true;
+      toast("down", t("Mất kết nối tới máy chủ giám sát"), t("Kiểm tra mạng hoặc máy chủ giám sát"));
+      if (!soundOff && snd.down) enqueue(async () => { await playWarn(); await speak(t("Mất kết nối tới máy chủ giám sát")); });
+    }
+  }
+  function remind() {
+    if (!snd.remind || soundOff || !S) return;
+    const downs = S.devices.filter(d => d.status === "down");
+    if (!downs.length) { lastRemind = Date.now(); return; }
+    if (Date.now() - lastRemind >= snd.remind * 60000) {
+      lastRemind = Date.now();
+      announce(downs.map(d => ({ name: d.name })), []);
+    }
+  }
+
+  // ------------------------------------------------------------ chon nhieu
+  function setSelecting(on) {
+    selecting = on;
+    if (!on) picked.clear();
+    $("btnSelect").classList.toggle("on", on);
+    render();
+  }
+  function updSelbar() {
+    $("selbar").hidden = !selecting;
+    $("selCount").textContent = t("Đã chọn {0}", picked.size);
+    document.querySelectorAll("#selbar [data-need]").forEach(b => b.disabled = !picked.size);
+  }
+  function togglePick(id) { picked.has(id) ? picked.delete(id) : picked.add(id); render(); }
+  $("btnSelect").onclick = () => setSelecting(!selecting);
+  $("selExit").onclick = () => setSelecting(false);
+  $("selAll").onclick = () => { visibleIds.forEach(id => picked.add(id)); render(); };
+  $("selDown").onclick = () => { S.devices.filter(d => d.status === "down").forEach(d => picked.add(d.id)); render(); };
+  $("selNone").onclick = () => { picked.clear(); render(); };
+  async function bulk(action, extra) {
+    try {
+      const j = await api("device/bulk", { ids: [...picked], action, ...(extra || {}) });
+      toast("info", t("Đã cập nhật {0} thiết bị", j.changed));
+    } catch (err) { toast("down", err.message); }
+  }
+  $("selPause").onclick = () => bulk("pause");
+  $("selResume").onclick = () => bulk("resume");
+  $("selGroup").onclick = () => {
+    $("gHint").textContent = t("Chuyển {0} thiết bị đã chọn sang nhóm:", picked.size);
+    $("gErr").textContent = ""; $("fGroupMove").reset(); open("mGroup");
+  };
+  $("fGroupMove").onsubmit = async e => {
+    e.preventDefault();
+    await bulk("group", { grp: e.target.grp.value });
+    close(e.target);
+  };
+  $("selDelete").onclick = () => {
+    const list = S.devices.filter(d => picked.has(d.id));
+    const preview = list.slice(0, 8).map(d => "• " + esc(d.name) + " (" + esc(d.host) + ")").join("<br>") + (list.length > 8 ? "<br>" + t("… và {0} thiết bị khác", list.length - 8) : "");
+    confirmBox(t("Xoá {0} thiết bị?", list.length), preview, list.length >= 10, async () => {
+      const j = await api("device/delete", { ids: [...picked] });
+      picked.clear(); toast("info", t("Đã xoá {0} thiết bị", j.deleted));
+    });
+  };
+  $("btnDeleteAll").onclick = () => {
+    $("mSettings").hidden = true;
+    confirmBox(t("Xoá tất cả {0} thiết bị?", S.devices.length), t("Toàn bộ danh sách giám sát sẽ bị xoá. Không thể hoàn tác (nên bấm <b>Xuất CSV</b> để lưu lại trước)."), true, async () => {
+      const j = await api("device/delete", { all: true });
+      picked.clear(); toast("info", t("Đã xoá {0} thiết bị", j.deleted));
+    });
+  };
+
+  // hop xac nhan (go XOA khi xoa nhieu)
+  let confirmFn = null;
+  function confirmBox(title, html, needWord, fn) {
+    $("cTitle").textContent = title; $("cBody").innerHTML = html;
+    $("cTypeWrap").hidden = !needWord; $("cErr").textContent = "";
+    $("fConfirm").reset(); confirmFn = fn; open("mConfirm");
+    if (!needWord) setTimeout(() => $("cOk").focus(), 50);
+  }
+  $("fConfirm").onsubmit = async e => {
+    e.preventDefault();
+    if (!$("cTypeWrap").hidden && !["XOA", "XÓA", "XOÁ", "DELETE"].includes(e.target.word.value.trim().toUpperCase())) { $("cErr").textContent = t("Gõ đúng chữ XOA để xác nhận"); return; }
+    try { await confirmFn(); close(e.target); } catch (err) { $("cErr").textContent = err.message; }
+  };
+
+  // ------------------------------------------------------------ hop thoai
+  function open(id) { $(id).hidden = false; const f = $(id).querySelector("input:not([type=hidden]):not([type=checkbox]),textarea"); if (f) setTimeout(() => f.focus(), 30); }
+  function close(el) { el.closest(".modal").hidden = true; render(); }
+  document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => close(b));
+  document.querySelectorAll(".modal").forEach(m => m.addEventListener("mousedown", e => { if (e.target === m) { m.hidden = true; render(); } }));
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") { hideHist(); document.querySelectorAll(".modal").forEach(m => m.hidden = true); render(); }
+  });
+
+  const F = $("fDevice");
+  function showTypeFields() {
+    const t = F.type.value;
+    F.querySelectorAll("[data-for]").forEach(el => el.hidden = !el.dataset.for.split(" ").includes(t));
+    $("lHost").textContent = window.t(t === "dns" ? "Địa chỉ máy chủ DNS" : t === "http" ? "Địa chỉ IP / tên máy (tự lấy từ URL nếu để trống)" : "Địa chỉ IP / tên máy");
+    if (t === "dns" && !F.port.value) F.port.placeholder = "53";
+  }
+  F.type.onchange = showTypeFields;
+  function editDevice(d) {
+    F.reset(); $("dErr").textContent = "";
+    $("dTitle").textContent = t(d ? "Sửa thiết bị" : "Thêm thiết bị");
+    $("dDelete").hidden = !d;
+    F.id.value = d ? d.id : "";
+    F.name.value = d ? d.name : ""; F.type.value = d ? d.type : "ping"; F.host.value = d ? d.host : "";
+    F.port.value = d && d.port ? d.port : ""; F.grp.value = d ? d.grp : ($("fGroup").value || "");
+    F.note.value = d ? d.note : ""; F.enabled.checked = d ? !!d.enabled : true;
+    F.querySelectorAll("input[name=target]").forEach(i => i.value = d && i.dataset.t === d.type ? d.target : "");
+    showTypeFields(); open("mDevice");
+  }
+  F.onsubmit = async e => {
+    e.preventDefault();
+    const t = F.type.value;
+    const target = [...F.querySelectorAll("input[name=target]")].find(i => i.dataset.t === t);
+    const body = { id: F.id.value ? +F.id.value : null, name: F.name.value, type: t, host: F.host.value,
+      port: F.port.value, target: target ? target.value : "", grp: F.grp.value, note: F.note.value, enabled: F.enabled.checked };
+    try { await api("device/save", body); close(F); }
+    catch (err) { $("dErr").textContent = err.message; }
+  };
+  $("dDelete").onclick = async () => {
+    if (!confirm(t("Xoá thiết bị \"{0}\"?", F.name.value))) return;
+    try { await api("device/delete", { id: +F.id.value }); close(F); }
+    catch (err) { $("dErr").textContent = err.message; }
+  };
+
+  const FI = $("fImport");
+  FI.replace.onchange = () => {
+    $("iSubmit").textContent = t(FI.replace.checked ? "Xoá cũ & nhập mới" : "Nhập");
+    $("iSubmit").className = FI.replace.checked ? "danger solid" : "primary";
+  };
+  FI.onsubmit = async e => {
+    e.preventDefault();
+    const replace = FI.replace.checked;
+    if (replace && S.devices.length &&
+        !confirm(t("Xoá toàn bộ {0} thiết bị hiện có rồi nhập danh sách mới?\n(Nếu danh sách mới không có dòng hợp lệ thì danh sách cũ được giữ nguyên.)", S.devices.length))) return;
+    try {
+      const j = await api("import", { text: FI.text.value, grp: FI.grp.value, replace });
+      $("iErr").style.color = j.errors.length ? "var(--warn)" : "var(--up)";
+      $("iErr").textContent = (j.replaced ? t("Đã xoá {0} thiết bị cũ. ", j.replaced) : "") + t("Đã thêm {0} thiết bị.", j.added) +
+        (j.errors.length ? "\n" + j.errors.map(trMsg).join("\n") : "");
+      if (!j.errors.length) FI.text.value = "";
+      FI.replace.checked = false; FI.replace.onchange();
+    } catch (err) {
+      $("iErr").style.color = "";
+      $("iErr").textContent = err.message + (err.data && err.data.errors && err.data.errors.length ? "\n" + err.data.errors.join("\n") : "");
+    }
+  };
+
+  $("fLogin").onsubmit = async e => {
+    e.preventDefault();
+    try { await api("login", { password: e.target.password.value }); e.target.reset(); close(e.target); toast("info", t("Đã đăng nhập quản trị")); }
+    catch (err) { $("lErr").textContent = err.message; }
+  };
+  $("btnLogout").onclick = async () => { await api("logout"); $("mSettings").hidden = true; setSelecting(false); };
+
+  const FS = $("fSettings");
+  function openSettings() {
+    const s = S.settings;
+    ["title", "interval", "timeout", "fail_threshold", "ok_threshold"].forEach(k => FS[k].value = s[k]);
+    updHint(); $("sErr").textContent = ""; open("mSettings");
+  }
+  function updHint() {
+    const sec = (+FS.interval.value || 0) * (+FS.fail_threshold.value || 0);
+    $("sHint").textContent = t("Thiết bị sẽ bị báo mất kết nối sau khoảng {0} giây không phản hồi.", sec);
+  }
+  FS.oninput = updHint;
+  FS.onsubmit = async e => {
+    e.preventDefault();
+    const b = {}; ["title", "interval", "timeout", "fail_threshold", "ok_threshold"].forEach(k => b[k] = FS[k].value);
+    try { await api("settings", b); close(FS); } catch (err) { $("sErr").textContent = err.message; }
+  };
+
+  // ------------------------------------------------------------ cai dat am thanh
+  function fillPresets(sel, lib, val) {
+    sel.innerHTML = Object.entries(lib).map(([k, v]) => `<option value="${k}">${esc(t(v[0]))}</option>`).join("");
+    sel.value = lib[val] ? val : Object.keys(lib)[0];
+  }
+  function updFileBox(kind) {
+    const isCustom = (kind === "down" ? snd.downPreset : snd.upPreset) === "custom";
+    const box = kind === "down" ? $("fbDown") : $("fbUp");
+    box.hidden = !isCustom;
+    const f = store.get("file_" + kind, null);
+    $(kind === "down" ? "snDownFileName" : "snUpFileName").textContent = f ? t("Đang dùng: ") + f.name : t("Chưa chọn tệp");
+  }
+  function openSound() {
+    $("snDown").checked = snd.down; $("snUp").checked = snd.up; $("snSpeak").checked = snd.speak;
+    $("snVol").value = snd.vol; $("snRemind").value = String(snd.remind);
+    fillPresets($("snDownPreset"), DOWN_SOUNDS, snd.downPreset);
+    fillPresets($("snUpPreset"), UP_SOUNDS, snd.upPreset);
+    $("snDownRepeat").value = String(snd.downRepeat); $("snUpRepeat").value = String(snd.upRepeat);
+    updFileBox("down"); updFileBox("up"); $("snErr").textContent = "";
+    loadVoices(); open("mSound");
+  }
+  const bindSnd = (id, key, conv, after) => $(id).onchange = e => { snd[key] = conv(e.target); store.set(key, snd[key]); updSoundBtn(); after && after(); };
+  bindSnd("snDown", "down", t => t.checked); bindSnd("snUp", "up", t => t.checked); bindSnd("snSpeak", "speak", t => t.checked);
+  bindSnd("snVoice", "voice", t => t.value); bindSnd("snRemind", "remind", t => +t.value);
+  bindSnd("snDownPreset", "downPreset", t => t.value, () => { updFileBox("down"); if (snd.downPreset !== "custom") testDown(); });
+  bindSnd("snUpPreset", "upPreset", t => t.value, () => { updFileBox("up"); if (snd.upPreset !== "custom") testUp(); });
+  bindSnd("snDownRepeat", "downRepeat", t => +t.value); bindSnd("snUpRepeat", "upRepeat", t => +t.value);
+  $("snVol").oninput = e => { snd.vol = +e.target.value; store.set("vol", snd.vol); if (master) master.gain.value = snd.vol / 100; };
+  function onFile(kind) {
+    return e => {
+      const f = e.target.files[0]; if (!f) return;
+      if (f.size > 1.5 * 1024 * 1024) { $("snErr").textContent = t("Tệp quá lớn (tối đa 1,5 MB). Hãy cắt ngắn hoặc chọn mp3 nhẹ hơn."); e.target.value = ""; return; }
+      const rd = new FileReader();
+      rd.onload = () => {
+        if (!store.set("file_" + kind, { name: f.name, url: rd.result })) { $("snErr").textContent = t("Trình duyệt không cho lưu tệp (bộ nhớ đầy hoặc bị chặn)."); return; }
+        $("snErr").textContent = ""; updFileBox(kind); kind === "down" ? testDown() : testUp();
+      };
+      rd.readAsDataURL(f);
+    };
+  }
+  $("snDownFile").onchange = onFile("down"); $("snUpFile").onchange = onFile("up");
+  function unmute() { soundOff = false; updSoundBtn(); audio(); }
+  const testDown = () => { unmute(); enqueue(() => playPreset("down", snd.downPreset, 1)); };
+  const testUp = () => { unmute(); enqueue(() => playPreset("up", snd.upPreset, 1)); };
+  $("snTestDown").onclick = testDown; $("snTestUp").onclick = testUp;
+  $("snTestAll").onclick = () => { unmute(); announce([{ name: t("Switch tầng 3") }], [{ name: t("Switch tầng 3") }]); };
+  function updSoundBtn() {
+    const on = !soundOff && (snd.down || snd.up);
+    $("btnSound").textContent = t(on ? "🔊 Âm thanh" : "🔇 Đang tắt tiếng");
+    $("btnSound").style.color = on ? "" : "var(--warn)";
+  }
+
+  // ------------------------------------------------------------ giao dien ngay / dem
+  const THEMES = { dark: t("🌙 Đêm"), light: t("☀ Ngày"), auto: t("🕒 Tự động") };
+  let themeMode = store.get("theme", "dark");
+  function applyTheme() {
+    const h = new Date().getHours();
+    const th = themeMode === "auto" ? (h >= 6 && h < 18 ? "light" : "dark") : themeMode;
+    if (document.documentElement.dataset.theme !== th) document.documentElement.dataset.theme = th;
+    $("btnTheme").textContent = THEMES[themeMode];
+    $("btnTheme").title = t(themeMode === "auto" ? "Tự động: Ngày 6:00–18:00, Đêm 18:00–6:00. Bấm để đổi." : "Bấm để đổi giao diện");
+  }
+  $("btnTheme").onclick = () => {
+    themeMode = { dark: "light", light: "auto", auto: "dark" }[themeMode];
+    store.set("theme", themeMode); applyTheme();
+  };
+
+  // ------------------------------------------------------------ lich su thiet bi (tro chuot vao ten)
+  const histCache = {};
+  let histId = null, histShowT = null, histHideT = null, histPinned = false, histRect = null;
+  const H = $("hist");
+  function hideHist() { H.hidden = true; histId = null; histPinned = false; H.classList.remove("pinned"); }
+  function placeHist() {
+    if (!histRect) return;
+    const w = H.offsetWidth, h = H.offsetHeight, vw = innerWidth, vh = innerHeight;
+    let left = Math.min(Math.max(8, histRect.left), vw - w - 8);
+    let top = histRect.bottom + 6;
+    if (top + h > vh - 8) top = histRect.top - h - 6 >= 8 ? histRect.top - h - 6 : Math.max(8, vh - h - 8);
+    H.style.left = left + "px"; H.style.top = top + "px";
+  }
+  async function showHist(id, rect) {
+    histId = id; histRect = rect;
+    const c = histCache[id];
+    if (c && Date.now() - c.t < 15000) { drawHist(c.data); }
+    else {
+      const d = S && S.devices.find(x => x.id === id);
+      H.dataset.for = "";
+      H.innerHTML = `<div class="hh"><div class="nm">${esc(d ? d.name : "")}</div></div><div class="hempty">${t("Đang tải nhật ký…")}</div>`;
+      H.hidden = false; placeHist();
+      try {
+        const r = await fetch("api/history?id=" + id, { cache: "no-store", credentials: "same-origin" });
+        if (!r.ok) throw new Error();
+        const data = await r.json();
+        histCache[id] = { t: Date.now(), data };
+        if (histId === id) drawHist(data);
+      } catch (e) { if (histId === id) H.querySelector(".hempty").textContent = t("Không tải được nhật ký"); }
+    }
+  }
+  const fmtFull = ts => { const d = new Date(ts * 1000); return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
+  function statBox(label, st) {
+    return `<div>${t(label)}<b class="${st.count ? "bad" : ""}">${t("{0} lần mất", st.count)}</b>${st.count ? t("tổng {0} · ", dur(st.downtime)) : ""}${t("{0}% hoạt động", st.uptime_pct)}</div>`;
+  }
+  function drawHist(h) {
+    const now = nowS();
+    const nowTxt = h.status === "down" ? t("MẤT KẾT NỐI từ {0} ({1})", fmtFull(h.since), dur(now - h.since)) :
+                   h.status === "up" ? t("Hoạt động liên tục {0} (từ {1})", dur(now - h.since), fmtFull(h.since)) :
+                   h.status === "paused" ? t("Đang tạm dừng giám sát") : t("Đang kiểm tra…");
+    const cls = h.status === "down" || h.status === "up" ? h.status : "other";
+    const evs = h.events.map(e => {
+      const k = e.kind === "down" || e.kind === "up" ? e.kind : "other";
+      const len = e.kind !== "down" ? "" : e.ongoing ? `<span class="len on">${t("đang diễn ra · {0}", dur(now - e.ts))}</span>` :
+                  e.duration != null ? `<span class="len">${t("kéo dài {0}", dur(e.duration))}</span>` : "";
+      return `<div class="hev"><time>${fmtFull(e.ts)}</time><div><span class="k ${k}">${EV_LABEL[e.kind] || e.kind}</span>${len}
+        ${e.detail ? `<div class="d">${esc(trMsg(e.detail))}</div>` : ""}</div></div>`;
+    }).join("");
+    const oldList = H.querySelector(".hl"), keep = oldList && H.dataset.for === String(h.id) ? oldList.scrollTop : 0;
+    H.dataset.for = h.id;
+    H.innerHTML = `<div class="hh"><div class="nm"><span class="dot ${cls}" style="background:var(--${cls === "other" ? "gray" : cls})"></span>${esc(h.name)}</div>
+        <div class="sub">${esc(h.host)}</div><div class="now ${cls}">${nowTxt}</div></div>
+      <div class="hstats">${statBox("24 giờ qua", h.stats.day)}${statBox("7 ngày qua", h.stats.week)}${statBox("30 ngày qua", h.stats.month)}</div>
+      <div class="hl">${evs || `<div class="hempty">${t("Chưa có sự kiện nào")}</div>`}</div>
+      <div class="hf"><span>${h.events.length >= 60 ? t("60 sự kiện gần nhất") : t("{0} sự kiện", h.events.length)}</span><span>${t(histPinned ? "Bấm ra ngoài / Esc để đóng" : "Bấm vào tên để ghim")}</span></div>`;
+    if (keep) H.querySelector(".hl").scrollTop = keep;
+    H.classList.toggle("pinned", histPinned);
+    H.hidden = false; placeHist();
+  }
+  document.addEventListener("mouseover", e => {
+    if (e.target.closest("#hist")) { clearTimeout(histHideT); return; }
+    const a = e.target.closest("[data-hist]");
+    if (a && !selecting && !document.querySelector(".modal:not([hidden])")) {
+      clearTimeout(histHideT);
+      const id = +a.dataset.hist;
+      if (histPinned || (id === histId && !H.hidden)) return;
+      clearTimeout(histShowT);
+      const rect = a.getBoundingClientRect();
+      histShowT = setTimeout(() => showHist(id, rect), 450);
+      return;
+    }
+    clearTimeout(histShowT);
+    if (!H.hidden && !histPinned) { clearTimeout(histHideT); histHideT = setTimeout(hideHist, 150); }
+  });
+  // bam vao ten: ghim o lich su (dung duoc tren dien thoai)
+  document.addEventListener("mousedown", e => {
+    if (e.target.closest("#hist")) return;
+    const a = e.target.closest("[data-hist]");
+    if (a && !selecting) {
+      clearTimeout(histShowT); histPinned = true; H.classList.add("pinned");
+      showHist(+a.dataset.hist, a.getBoundingClientRect());
+      return;
+    }
+    if (!H.hidden) hideHist();
+  }, true);
+  addEventListener("scroll", () => { if (!H.hidden && !histPinned) hideHist(); }, { passive: true });
+  addEventListener("resize", () => { if (!H.hidden) placeHist(); });
+
+  // ------------------------------------------------------------ khung nhat ky: an/hien, do rong, co chu
+  const LOG_W = { min: 240, max: 900, def: 340 };
+  const logUi = { show: store.get("logShow", true), w: store.get("logW", LOG_W.def), fs: store.get("logFs", 13) };
+  function clampW(w) { return Math.round(Math.min(Math.max(w, LOG_W.min), Math.min(LOG_W.max, innerWidth * 0.7))); }
+  function applyLog() {
+    document.body.classList.toggle("nolog", !logUi.show);
+    $("btnLog").classList.toggle("on", logUi.show);
+    $("btnLog").title = t(logUi.show ? "Đang hiện nhật ký – bấm để ẩn" : "Đang ẩn nhật ký – bấm để hiện");
+    document.documentElement.style.setProperty("--log-w", clampW(logUi.w) + "px");
+    document.documentElement.style.setProperty("--log-fs", logUi.fs + "px");
+    $("logSmaller").disabled = logUi.fs <= 11; $("logBigger").disabled = logUi.fs >= 22;
+  }
+  const saveLog = () => { store.set("logShow", logUi.show); store.set("logW", logUi.w); store.set("logFs", logUi.fs); applyLog(); };
+  $("btnLog").onclick = () => { logUi.show = !logUi.show; saveLog(); };
+  $("logHide").onclick = () => { logUi.show = false; saveLog(); };
+  $("logSmaller").onclick = () => { logUi.fs = Math.max(11, logUi.fs - 1); saveLog(); };
+  $("logBigger").onclick = () => { logUi.fs = Math.min(22, logUi.fs + 1); saveLog(); };
+  $("logNarrow").onclick = () => { logUi.w = clampW(clampW(logUi.w) - 80); saveLog(); };
+  $("logWide").onclick = () => { logUi.w = clampW(clampW(logUi.w) + 80); saveLog(); };
+  // keo canh trai cua khung de chinh do rong
+  const rz = $("logResizer");
+  rz.addEventListener("pointerdown", e => {
+    e.preventDefault(); rz.setPointerCapture(e.pointerId); document.body.classList.add("resizing");
+    const right = $("events").closest("aside").getBoundingClientRect().right;
+    const move = ev => { logUi.w = clampW(right - ev.clientX); applyLog(); };
+    const up = () => { rz.removeEventListener("pointermove", move); rz.removeEventListener("pointerup", up);
+      document.body.classList.remove("resizing"); saveLog(); };
+    rz.addEventListener("pointermove", move); rz.addEventListener("pointerup", up);
+  });
+  rz.addEventListener("dblclick", () => { logUi.w = LOG_W.def; logUi.fs = 13; saveLog(); });
+  addEventListener("resize", applyLog);
+
+  // ------------------------------------------------------------ kieu hien thi
+  function applyView() {
+    $("vTile").classList.toggle("on", ui.view === "tile"); $("vList").classList.toggle("on", ui.view === "list");
+    $("tileSize").hidden = ui.view !== "tile";
+    $("tileSize").value = String(ui.tileW);
+    document.documentElement.style.setProperty("--tile-w", ui.tileW + "px");
+    render();
+  }
+  $("vTile").onclick = () => { ui.view = "tile"; store.set("view", "tile"); applyView(); };
+  $("vList").onclick = () => { ui.view = "list"; store.set("view", "list"); applyView(); };
+  $("tileSize").onchange = e => { ui.tileW = +e.target.value; store.set("tileW", ui.tileW); applyView(); };
+
+  // ------------------------------------------------------------ su kien giao dien
+  $("btnAdd").onclick = () => editDevice(null);
+  $("btnImport").onclick = () => { $("iErr").textContent = ""; FI.grp.value = $("fGroup").value || ""; open("mImport"); };
+  $("btnExport").onclick = () => { location.href = "api/export"; };
+  $("btnLogin").onclick = () => { $("lErr").textContent = ""; open("mLogin"); };
+  $("btnSettings").onclick = openSettings;
+  $("btnSound").onclick = openSound;
+  // mousedown: khong bi mat cu bam khi luoi duoc ve lai moi giay
+  $("grid").onmousedown = e => {
+    if (e.button !== 0) return;
+    const t = e.target;
+    if (t.dataset.edit) { e.preventDefault(); editDevice(S.devices.find(d => d.id === +t.dataset.edit)); return; }
+    if (!selecting) return;
+    if (t.dataset.pickgroup) { e.preventDefault(); t.dataset.pickgroup.split(",").forEach(id => picked.add(+id)); render(); return; }
+    if (t.hasAttribute("data-pickall")) { e.preventDefault();
+      const all = visibleIds.every(id => picked.has(id)); visibleIds.forEach(id => all ? picked.delete(id) : picked.add(id)); render(); return; }
+    const row = t.closest("[data-id]");
+    if (row) { e.preventDefault(); togglePick(+row.dataset.id); }
+  };
+  $("grid").onclick = e => { if (selecting && e.target.type === "checkbox") e.preventDefault(); };
+  $("downbar").onmousedown = e => {
+    const id = e.target.dataset.id;
+    if (!id) return;
+    const el = document.querySelector(`[data-id="${id}"]:is(.tile, tr)`);
+    if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); flashUntil[id] = Date.now() + 3000; render(); }
+  };
+  document.querySelectorAll(".stat").forEach(s => s.onclick = () => { filter = filter === s.dataset.f ? "all" : s.dataset.f; render(); });
+  $("q").oninput = render; $("fGroup").onchange = render;
+  $("evOnlyState").onchange = renderEvents;
+
+  // mo khoa am thanh
+  function unlocked() {
+    $("unlock").hidden = true;
+    if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+  }
+  $("btnUnlock").onclick = () => { audio(); soundOff = false; updSoundBtn(); unlocked(); enqueue(() => playPreset("up", snd.upPreset, 1)); };
+  $("btnNoSound").onclick = () => { soundOff = true; updSoundBtn(); unlocked(); };
+  try {
+    const c = audio();
+    setTimeout(() => { if (!c || c.state !== "running") $("unlock").hidden = false; }, 300);
+  } catch (e) { $("unlock").hidden = false; }
+  if ("speechSynthesis" in window) { speechSynthesis.onvoiceschanged = loadVoices; loadVoices(); }
+
+  setInterval(() => {
+    const d = new Date();
+    $("clock").textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+    checkLost(); remind(); applyTheme();
+    if (!H.hidden && histId && histCache[histId]) drawHist(histCache[histId].data);
+    if (S && !document.querySelector(".modal:not([hidden])")) render();
+  }, 1000);
+  setInterval(poll, POLL_MS);
+  $("btnLang").onclick = () => {
+    store.set("lang", LANG === "en" ? "vi" : "en");
+    location.href = location.pathname;          // tai lai trang voi ngon ngu moi (bo ?lang=)
+  };
+  translateStatic();
+  applyTheme(); applyLog(); applyView(); updSoundBtn();
+  poll();
+})();
+</script>
+</body>
+</html>

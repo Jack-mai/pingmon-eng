@@ -1,0 +1,42 @@
+name: pingmon
+
+services:
+  pingmon:
+    image: python:3.12-alpine
+    container_name: pingmon
+    restart: unless-stopped
+    working_dir: /app
+    command: ["python", "-u", "app.py"]
+    # Can quyen raw socket de gui ICMP (ping)
+    cap_add:
+      - NET_RAW
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Chua dat ADMIN_PASSWORD trong .env}
+      DATA_DIR: /data
+      CERT_FILE: /ssl/pingmon.crt
+      KEY_FILE: /ssl/pingmon.key
+      HTTPS_LISTEN: "443"
+      HTTP_LISTEN: "80"
+      PUBLIC_HTTPS_PORT: ${HTTPS_PORT:-443}
+      TZ: ICT-7
+    volumes:
+      - ./app:/app:ro
+      - ./data:/data
+      - ./ssl:/ssl:ro
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    # Neu can phan giai ten may noi bo (VD: kiem tra theo ten thay vi IP), bo comment va dien DNS noi bo:
+    # dns:
+    #   - 10.10.x.x
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,ssl;urllib.request.urlopen('https://127.0.0.1/healthz',context=ssl._create_unverified_context(),timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
