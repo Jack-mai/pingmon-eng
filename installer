@@ -216,7 +216,6 @@ PLAIN_PORT = int(os.environ.get("PORT", "8080"))          # khi khong co chung c
 PUBLIC_HTTPS_PORT = int(os.environ.get("PUBLIC_HTTPS_PORT", "443"))
 PING_CMD = os.environ.get("PING_CMD", "ping")
 WORKERS = int(os.environ.get("WORKERS", "64"))
-EVENT_KEEP_DAYS = 180
 HIST_LEN = 30
 
 DEFAULT_SETTINGS = {
@@ -225,6 +224,7 @@ DEFAULT_SETTINGS = {
     "timeout": 2,           # giay cho moi lan kiem tra
     "fail_threshold": 3,    # so lan loi lien tiep -> MAT KET NOI
     "ok_threshold": 1,      # so lan thanh cong lien tiep -> KET NOI LAI
+    "event_keep_days": 180, # tu dong xoa nhat ky su kien cu hon so ngay nay
 }
 TYPES = ("ping", "tcp", "http", "dns")
 HOST_RE = re.compile(r"^[A-Za-z0-9_.:\[\]-]{1,253}$")
@@ -237,6 +237,7 @@ settings = dict(DEFAULT_SETTINGS)
 sessions = {}     # token -> het han
 inflight = set()
 version = 0
+events_epoch = 0  # tang moi khi nhat ky bi xoa -> trinh duyet tai lai nhat ky
 
 
 def log(*a):
@@ -270,6 +271,9 @@ def db_init():
                 settings[row["key"]] = json.loads(row["value"])
             except Exception:
                 pass
+    global events_epoch
+    row = db.execute("SELECT value FROM settings WHERE key='events_epoch'").fetchone()
+    events_epoch = int(row["value"]) if row else 0
     for row in db.execute("SELECT * FROM devices"):
         d = dict(row)
         devices[d["id"]] = d
@@ -289,9 +293,25 @@ def add_event(d, kind, detail=""):
         "INSERT INTO events(ts, device_id, name, host, kind, detail) VALUES (?,?,?,?,?,?)",
         (time.time(), d.get("id"), d.get("name"), d.get("host"), kind, detail or ""))
     db.commit()
-    if cur.lastrowid % 500 == 0:
-        db.execute("DELETE FROM events WHERE ts < ?", (time.time() - EVENT_KEEP_DAYS * 86400,))
-        db.commit()
+    return cur.lastrowid
+
+
+def purge_old_events():
+    """Xoa nhat ky cu hon event_keep_days. Goi khi dang giu lock."""
+    cur = db.execute("DELETE FROM events WHERE ts < ?", (time.time() - settings["event_keep_days"] * 86400,))
+    db.commit()
+    if cur.rowcount:
+        bump_epoch()
+        log(f"Tu dong xoa {cur.rowcount} su kien cu hon {settings['event_keep_days']} ngay")
+    return cur.rowcount
+
+
+def bump_epoch():
+    global events_epoch, version
+    events_epoch += 1
+    db.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('events_epoch', ?)", (str(events_epoch),))
+    db.commit()
+    version += 1
 
 
 # =================================================================== Kiem tra
@@ -453,8 +473,16 @@ def apply_result(did, snap, ok, rtt, msg):
 
 def scheduler():
     pool = ThreadPoolExecutor(max_workers=WORKERS)
+    next_purge = time.time() + 60
     while True:
         now = time.time()
+        if now >= next_purge:                 # don nhat ky cu moi gio
+            next_purge = now + 3600
+            with lock:
+                try:
+                    purge_old_events()
+                except Exception as e:
+                    log("Loi don nhat ky:", e)
         jobs = []
         with lock:
             for did, d in devices.items():
@@ -709,7 +737,8 @@ def api_import(body):
 
 def api_settings(body):
     global version
-    limits = {"interval": (5, 3600), "timeout": (1, 30), "fail_threshold": (1, 20), "ok_threshold": (1, 20)}
+    limits = {"interval": (5, 3600), "timeout": (1, 30), "fail_threshold": (1, 20), "ok_threshold": (1, 20),
+              "event_keep_days": (1, 3650)}
     with lock:
         for k, (lo, hi) in limits.items():
             if k in body:
@@ -727,6 +756,8 @@ def api_settings(body):
         for k, v in settings.items():
             db.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?,?)", (k, json.dumps(v)))
         db.commit()
+        if "event_keep_days" in body:
+            purge_old_events()            # ap dung ngay thoi han luu moi
         version += 1
     return 200, {"ok": True, "settings": settings}
 
@@ -755,6 +786,7 @@ def snapshot(since, admin):
             "now": time.time(), "version": version, "settings": settings,
             "admin": admin, "auth": bool(ADMIN_PASSWORD),
             "devices": out, "events": [dict(x) for x in rows], "last_event_id": last,
+            "events_epoch": events_epoch,
         }
 
 
@@ -792,6 +824,67 @@ def device_history(did):
             "since": d["since"], "created": d.get("created"),
             "stats": {"day": stat(86400), "week": stat(7 * 86400), "month": stat(30 * 86400)},
             "events": rows[::-1][:60]}
+
+
+def api_events_clear(body):
+    """Xoa nhat ky su kien.
+       {"mode": "all"}                       toan bo
+       {"mode": "older", "days": 30}         cu hon N ngay
+       {"mode": "device", "device_id": 5}    cua 1 thiet bi
+       {"mode": "ids", "ids": [12, 13]}      tung su kien
+       "dry_run": true -> chi dem, khong xoa."""
+    mode = body.get("mode")
+    if mode == "all":
+        where, args, label = "1=1", (), "toàn bộ"
+    elif mode == "older":
+        try:
+            days = float(body.get("days"))
+            assert days >= 0
+        except Exception:
+            return 400, {"error": "Số ngày không hợp lệ"}
+        where, args, label = "ts < ?", (time.time() - days * 86400,), f"cũ hơn {days:g} ngày"
+    elif mode == "device":
+        try:
+            did = int(body.get("device_id"))
+        except Exception:
+            return 400, {"error": "Chưa chọn thiết bị"}
+        name = devices.get(did, {}).get("name", f"#{did}")
+        where, args, label = "device_id = ?", (did,), f"thiết bị {name}"
+    elif mode == "ids":
+        try:
+            ids = [int(x) for x in body.get("ids") or []][:5000]
+        except Exception:
+            ids = []
+        if not ids:
+            return 400, {"error": "Chưa chọn sự kiện"}
+        where, args, label = f"id IN ({','.join('?' * len(ids))})", tuple(ids), ""
+    else:
+        return 400, {"error": "Thao tác không hợp lệ"}
+    with lock:
+        count = db.execute(f"SELECT COUNT(*) FROM events WHERE {where}", args).fetchone()[0]
+        if body.get("dry_run") is True:
+            return 200, {"ok": True, "count": count}
+        if count:
+            db.execute(f"DELETE FROM events WHERE {where}", args)
+            db.commit()
+            if mode != "ids":   # ghi lai ai da xoa gi (khong ghi cho xoa tung dong)
+                add_event({"name": f"{count} sự kiện", "host": ""}, "clearlog", label)
+            bump_epoch()
+            log(f"Xoa nhat ky ({mode} {label}): {count} su kien")
+    return 200, {"ok": True, "deleted": count}
+
+
+def export_events_csv():
+    with lock:
+        rows = db.execute("SELECT ts, kind, name, host, detail FROM events ORDER BY id").fetchall()
+    def q(v):
+        v = "" if v is None else str(v)
+        return '"' + v.replace('"', '""') + '"' if any(c in v for c in ',"\n') else v
+    out = ["thoi_gian,su_kien,ten,dia_chi,chi_tiet"]
+    for r in rows:
+        out.append(",".join(q(x) for x in (datetime.fromtimestamp(r["ts"]).strftime("%Y-%m-%d %H:%M:%S"),
+                                             r["kind"], r["name"], r["host"], r["detail"])))
+    return "\ufeff" + "\n".join(out) + "\n"     # BOM: Excel mo dung tieng Viet
 
 
 def export_csv():
@@ -867,6 +960,12 @@ class Handler(BaseHTTPRequestHandler):
                 did = 0
             h = device_history(did)
             return self._send(200, h) if h else self._send(404, {"error": "Không tìm thấy thiết bị"})
+        if u.path == "/api/events/export":
+            if not self.is_admin():
+                return self._send(403, {"error": "Cần đăng nhập quản trị"})
+            fn = "nhat-ky-" + datetime.now().strftime("%Y%m%d-%H%M") + ".csv"
+            return self._send(200, export_events_csv().encode("utf-8"), "text/csv; charset=utf-8",
+                              {"Content-Disposition": f'attachment; filename="{fn}"'})
         if u.path == "/api/export":
             if not self.is_admin():
                 return self._send(403, {"error": "Cần đăng nhập quản trị"})
@@ -924,6 +1023,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/device/bulk": api_device_bulk,
             "/api/import": api_import,
             "/api/settings": api_settings,
+            "/api/events/clear": api_events_clear,
         }
         fn = routes.get(u.path)
         if not fn:
@@ -1191,6 +1291,16 @@ cat > 'app/index.html' <<'__PINGMON_EOF_2__'
   .ev .k.other { color: var(--muted); }
   .ev .n { overflow-wrap: anywhere; }
   .ev .d { color: var(--muted); font-size: calc(var(--fs) - 1px); overflow-wrap: anywhere; }
+  .ev { position: relative; }
+  .ev-del { position: absolute; right: 8px; top: 6px; padding: 0 6px; font-size: 11px; line-height: 18px; opacity: 0;
+    background: var(--panel); }
+  .ev:hover .ev-del { opacity: .8; }
+  .ev-del:hover { opacity: 1; color: var(--down); border-color: var(--down); }
+  .ev .k.clearlog { color: var(--warn); }
+  .radio { display: flex; align-items: center; gap: 8px; margin: 12px 0; color: var(--text); font-size: 14px; cursor: pointer; flex-wrap: wrap; }
+  .radio input { width: auto; margin: 0; } .radio select { width: auto; min-width: 130px; max-width: 100%; padding: 5px 8px; }
+  #clPreview { margin-top: 14px; font-weight: 700; }
+  #hist .hf a { color: var(--down); text-decoration: none; font-weight: 600; }
   .ev.new { animation: evnew 3s; }
   @keyframes evnew { from { background: var(--evnew); } }
 
@@ -1338,7 +1448,8 @@ cat > 'app/index.html' <<'__PINGMON_EOF_2__'
       <button class="ghost" id="logWide" title="Mở rộng khung">Rộng</button>
       <button class="ghost" id="logHide" title="Ẩn nhật ký">✕</button>
     </h2>
-    <h2 style="padding-top:4px;padding-bottom:6px;border-bottom:1px solid var(--line)"><label><input type="checkbox" id="evOnlyState" checked> chỉ hiện mất / kết nối lại</label></h2>
+    <h2 style="padding-top:4px;padding-bottom:6px;border-bottom:1px solid var(--line)"><label><input type="checkbox" id="evOnlyState" checked> chỉ hiện mất / kết nối lại</label><span class="sp"></span>
+      <button class="ghost" id="logClear" title="Xoá nhật ký sự kiện" hidden>🗑 Xoá nhật ký</button></h2>
     <div id="events"></div>
   </aside>
 </main>
@@ -1434,6 +1545,10 @@ DNS nội bộ, 192.168.1.5, Máy chủ, dns, example.local
       <div><label>Lỗi liên tiếp → báo mất kết nối</label><input name="fail_threshold" type="number" min="1" max="20"></div>
       <div><label>Thành công liên tiếp → báo kết nối lại</label><input name="ok_threshold" type="number" min="1" max="20"></div>
     </div>
+    <div class="row2">
+      <div><label>Tự xoá nhật ký cũ hơn (ngày)</label><input name="event_keep_days" type="number" min="1" max="3650"></div>
+      <div></div>
+    </div>
     <div class="hint" id="sHint"></div>
     <div class="danger-zone">
       <p data-i18n="dangerZone">Xoá <b>toàn bộ</b> thiết bị đang giám sát (nhật ký sự kiện vẫn được giữ).</p>
@@ -1458,6 +1573,28 @@ DNS nội bộ, 192.168.1.5, Máy chủ, dns, example.local
     <div class="actions">
       <button type="button" class="ghost" data-close>Huỷ</button>
       <button type="submit" class="danger solid" id="cOk">Xoá</button>
+    </div>
+  </form>
+</div>
+
+<!-- ===== Xoa nhat ky su kien ===== -->
+<div class="modal" id="mClearLog" hidden>
+  <form class="box" id="fClearLog">
+    <h3>Xoá nhật ký sự kiện</h3>
+    <label class="radio"><input type="radio" name="mode" value="older" checked> <span>Xoá sự kiện cũ hơn</span>
+      <select name="days"><option value="1">1 ngày</option><option value="7">7 ngày</option><option value="30" selected>30 ngày</option>
+        <option value="90">90 ngày</option><option value="180">180 ngày</option></select></label>
+    <label class="radio"><input type="radio" name="mode" value="device"> <span>Chỉ nhật ký của thiết bị</span>
+      <select name="device_id"></select></label>
+    <label class="radio"><input type="radio" name="mode" value="all"> <span>Toàn bộ nhật ký</span></label>
+    <div id="clPreview"></div>
+    <div class="hint" data-i18n="clearHint">Chỉ xoá nhật ký, không ảnh hưởng tới thiết bị và trạng thái giám sát hiện tại.
+      Thống kê trong ô lịch sử (số lần mất kết nối, % hoạt động) được tính từ nhật ký, nên phần đã xoá sẽ không còn được tính.</div>
+    <div class="err" id="clErr"></div>
+    <div class="actions">
+      <button type="button" class="ghost left" id="clExport">⬇ Xuất nhật ký CSV</button>
+      <button type="button" class="ghost" data-close>Huỷ</button>
+      <button type="submit" class="danger solid" id="clOk">Xoá</button>
     </div>
   </form>
 </div>
@@ -1641,6 +1778,16 @@ const EN = {
   "24 giờ qua": "Last 24 hours", "7 ngày qua": "Last 7 days", "30 ngày qua": "Last 30 days", "Chưa có sự kiện nào": "No events yet",
   "60 sự kiện gần nhất": "Latest 60 events", "{0} sự kiện": "{0} events",
   "Bấm ra ngoài / Esc để đóng": "Click outside / Esc to close", "Bấm vào tên để ghim": "Click the name to pin",
+  // ---- xoa nhat ky
+  "Xoá nhật ký sự kiện": "Clear event log", "Xoá sự kiện cũ hơn": "Delete events older than",
+  "Chỉ nhật ký của thiết bị": "Only the log of device", "Toàn bộ nhật ký": "Entire log",
+  "1 ngày": "1 day", "7 ngày": "7 days", "30 ngày": "30 days", "90 ngày": "90 days", "180 ngày": "180 days",
+  "⬇ Xuất nhật ký CSV": "⬇ Export log CSV", "Đang đếm…": "Counting…", "Sẽ xoá {0} sự kiện.": "{0} event(s) will be deleted.",
+  "Đã xoá {0} sự kiện": "Deleted {0} event(s)", "Xoá toàn bộ nhật ký sự kiện?": "Delete the entire event log?",
+  "Toàn bộ nhật ký sẽ bị xoá vĩnh viễn. Nên bấm <b>Xuất nhật ký CSV</b> để lưu lại trước.":
+    "The entire log will be permanently deleted. Use <b>Export log CSV</b> to keep a copy first.",
+  "Xoá sự kiện này": "Delete this event", "🗑 Xoá nhật ký": "🗑 Clear log", "🗑 Xoá nhật ký thiết bị này": "🗑 Clear this device's log",
+  "XOÁ NHẬT KÝ": "LOG CLEARED", "Tự xoá nhật ký cũ hơn (ngày)": "Auto-delete log entries older than (days)",
   // ---- ngon ngu
   "🌐 English": "🌐 Tiếng Việt", "Chuyển sang tiếng Anh": "Switch to Vietnamese",
 };
@@ -1654,6 +1801,8 @@ const EN_HTML = {
   loginHint: 'Needed to add, edit or delete devices. Everyone can view and hear alerts without logging in.',
   dangerZone: 'Delete <b>all</b> monitored devices (the event log is kept).',
   confirmWord: 'Type <b>DELETE</b> to confirm',
+  clearHint: 'Only the log is deleted; devices and their current monitoring status are not affected. ' +
+             'History statistics (outage count, % uptime) are calculated from the log, so deleted entries are no longer counted.',
   soundHint: 'Settings are stored in this browser only. Sounds play when a device changes state.',
   importPlaceholder: 'Core switch, 192.168.1.2, Core\nFirewall, 192.168.1.3, Core\nIntranet web, 192.168.1.20, Servers, http, https://192.168.1.20/\nRemote Desktop, 192.168.1.21, Servers, tcp, 3389\nInternal DNS, 192.168.1.5, Servers, dns, example.local\n192.168.1.50\t2 ms\tPRINTER-T1',
 };
@@ -1695,6 +1844,9 @@ const SRV_EN = [
   [/^Giá trị (\w+) không hợp lệ$/, "Invalid value for $1"], [/^(\w+) phải từ (\d+) đến (\d+)$/, "$1 must be between $2 and $3"],
   [/^Dữ liệu không hợp lệ$/, "Invalid data"], [/^Cần JSON$/, "JSON required"], [/^Dữ liệu quá lớn$/, "Data too large"],
   [/^Lỗi máy chủ: (.*)$/, "Server error: $1"],
+  [/^Số ngày không hợp lệ$/, "Invalid number of days"], [/^Chưa chọn thiết bị$/, "No device selected"],
+  [/^Chưa chọn sự kiện$/, "No event selected"], [/^(\d+) sự kiện$/, "$1 events"], [/^toàn bộ$/, "all"],
+  [/^cũ hơn (.+) ngày$/, "older than $1 days"], [/^thiết bị (.+)$/, "device $1"],
 ];
 function trMsg(s) {
   if (LANG !== "en" || !s) return s || "";
@@ -1726,9 +1878,10 @@ function translateStatic() {
   const POLL_MS = 2000, LOST_MS = 15000;
   const TYPE_LABEL = { ping: "PING", tcp: "TCP", http: "HTTP", dns: "DNS" };
   const EV_LABEL = { down: t("MẤT KẾT NỐI"), up: t("KẾT NỐI LẠI"), add: t("THÊM"), edit: t("SỬA"), delete: t("XOÁ"),
-                     pause: t("TẠM DỪNG"), resume: t("TIẾP TỤC"), import: t("NHẬP") };
+                     pause: t("TẠM DỪNG"), resume: t("TIẾP TỤC"), import: t("NHẬP"), clearlog: t("XOÁ NHẬT KÝ") };
 
   let S = null, lastEv = null, events = [], skew = 0, lastOk = Date.now(), lost = false;
+  let evEpoch = null;
   let filter = "all", flashUntil = {}, lastRemind = Date.now();
   let selecting = false; const picked = new Set(); let visibleIds = [];
 
@@ -1985,7 +2138,7 @@ function translateStatic() {
     grid.innerHTML = !list.length ? emptyHtml(devs.length) : (ui.view === "list" ? listHtml(list, now) : tilesHtml(list, now, groups.length > 1 && !$("fGroup").value));
 
     document.body.classList.toggle("admin", S.admin);
-    ["btnAdd", "btnImport", "btnExport", "btnSettings", "btnSelect"].forEach(id => $(id).hidden = !S.admin);
+    ["btnAdd", "btnImport", "btnExport", "btnSettings", "btnSelect", "logClear"].forEach(id => $(id).hidden = !S.admin);
     $("btnLogin").hidden = S.admin || !S.auth;
     $("btnLogout").hidden = !S.auth;
     if (!S.admin && selecting) setSelecting(false);
@@ -2055,10 +2208,11 @@ function translateStatic() {
     const list = events.filter(e => !only || e.kind === "down" || e.kind === "up").slice(-150).reverse();
     const devIds = new Set(S ? S.devices.map(d => d.id) : []);
     $("events").innerHTML = list.map(e => {
-      const k = e.kind === "down" || e.kind === "up" ? e.kind : "other";
+      const k = e.kind === "down" || e.kind === "up" || e.kind === "clearlog" ? e.kind : "other";
+      const dl = [e.host, trMsg(e.detail)].filter(Boolean).join(" · ");
       return `<div class="ev${e._new ? " new" : ""}"><time>${fmtTime(e.ts)}</time><div>
         <span class="k ${k}">${EV_LABEL[e.kind] || e.kind}</span><span class="n"${e.device_id && devIds.has(e.device_id) ? ` data-hist="${e.device_id}"` : ""}>${esc(e.device_id ? e.name : trMsg(e.name))}</span>
-        ${e.host ? `<div class="d">${esc(e.host)}${e.detail ? " · " + esc(trMsg(e.detail)) : ""}</div>` : ""}</div></div>`;
+        ${dl ? `<div class="d">${esc(dl)}</div>` : ""}</div>${S && S.admin ? `<button class="ev-del" data-evdel="${e.id}" title="${t("Xoá sự kiện này")}">✕</button>` : ""}</div>`;
     }).join("") || `<div class="ev"><span></span><div class="d">${t("Chưa có sự kiện")}</div></div>`;
     events.forEach(e => delete e._new);
   }
@@ -2077,6 +2231,13 @@ function translateStatic() {
       const r = await fetch("api/state?since=" + since, { cache: "no-store", credentials: "same-origin" });
       if (!r.ok) throw new Error(r.status);
       const j = await r.json();
+      if (evEpoch !== null && j.events_epoch !== evEpoch) {
+        evEpoch = j.events_epoch; lastEv = null; events = [];
+        Object.keys(histCache).forEach(k => delete histCache[k]);
+        if (histId && !H.hidden) showHist(histId, histRect);
+        return poll();
+      }
+      evEpoch = j.events_epoch;
       skew = j.now - Date.now() / 1000;
       lastOk = Date.now();
       if (lost) { lost = false; toast("info", t("Đã kết nối lại tới máy chủ giám sát")); }
@@ -2266,7 +2427,7 @@ function translateStatic() {
   const FS = $("fSettings");
   function openSettings() {
     const s = S.settings;
-    ["title", "interval", "timeout", "fail_threshold", "ok_threshold"].forEach(k => FS[k].value = s[k]);
+    ["title", "interval", "timeout", "fail_threshold", "ok_threshold", "event_keep_days"].forEach(k => FS[k].value = s[k] ?? "");
     updHint(); $("sErr").textContent = ""; open("mSettings");
   }
   function updHint() {
@@ -2276,7 +2437,7 @@ function translateStatic() {
   FS.oninput = updHint;
   FS.onsubmit = async e => {
     e.preventDefault();
-    const b = {}; ["title", "interval", "timeout", "fail_threshold", "ok_threshold"].forEach(k => b[k] = FS[k].value);
+    const b = {}; ["title", "interval", "timeout", "fail_threshold", "ok_threshold", "event_keep_days"].forEach(k => b[k] = FS[k].value);
     try { await api("settings", b); close(FS); } catch (err) { $("sErr").textContent = err.message; }
   };
 
@@ -2401,7 +2562,7 @@ function translateStatic() {
         <div class="sub">${esc(h.host)}</div><div class="now ${cls}">${nowTxt}</div></div>
       <div class="hstats">${statBox("24 giờ qua", h.stats.day)}${statBox("7 ngày qua", h.stats.week)}${statBox("30 ngày qua", h.stats.month)}</div>
       <div class="hl">${evs || `<div class="hempty">${t("Chưa có sự kiện nào")}</div>`}</div>
-      <div class="hf"><span>${h.events.length >= 60 ? t("60 sự kiện gần nhất") : t("{0} sự kiện", h.events.length)}</span><span>${t(histPinned ? "Bấm ra ngoài / Esc để đóng" : "Bấm vào tên để ghim")}</span></div>`;
+      <div class="hf"><span>${h.events.length >= 60 ? t("60 sự kiện gần nhất") : t("{0} sự kiện", h.events.length)}</span><span>${histPinned && S && S.admin && h.events.length ? `<a href="#" data-clearhist="${h.id}">${t("🗑 Xoá nhật ký thiết bị này")}</a>` : (t(histPinned ? "Bấm ra ngoài / Esc để đóng" : "Bấm vào tên để ghim"))}</span></div>`;
     if (keep) H.querySelector(".hl").scrollTop = keep;
     H.classList.toggle("pinned", histPinned);
     H.hidden = false; placeHist();
@@ -2466,6 +2627,69 @@ function translateStatic() {
   });
   rz.addEventListener("dblclick", () => { logUi.w = LOG_W.def; logUi.fs = 13; saveLog(); });
   addEventListener("resize", applyLog);
+
+  // ------------------------------------------------------------ xoa nhat ky su kien
+  const FC = $("fClearLog");
+  function clBody() {
+    const m = FC.mode.value;
+    return m === "older" ? { mode: m, days: +FC.days.value } : m === "device" ? { mode: m, device_id: +FC.device_id.value } : { mode: "all" };
+  }
+  let clSeq = 0;
+  async function clPreview() {
+    const seq = ++clSeq;
+    $("clPreview").textContent = t("Đang đếm…"); $("clErr").textContent = "";
+    try {
+      const r = await fetch("api/events/clear", { method: "POST", headers: { "Content-Type": "application/json" },
+        credentials: "same-origin", body: JSON.stringify({ ...clBody(), dry_run: true }) });
+      const j = await r.json();
+      if (seq !== clSeq) return;
+      if (!r.ok) throw new Error(trMsg(j.error));
+      $("clPreview").textContent = t("Sẽ xoá {0} sự kiện.", j.count);
+      $("clOk").disabled = !j.count;
+    } catch (err) { if (seq === clSeq) { $("clPreview").textContent = ""; $("clErr").textContent = err.message; } }
+  }
+  function openClearLog(deviceId) {
+    FC.reset();
+    FC.device_id.innerHTML = S.devices.slice().sort((a, b) => a.name.localeCompare(b.name, "vi", { numeric: true }))
+      .map(d => `<option value="${d.id}">${esc(d.name)} (${esc(d.host)})</option>`).join("");
+    if (deviceId) { FC.mode.value = "device"; FC.device_id.value = String(deviceId); }
+    open("mClearLog"); clPreview();
+  }
+  FC.days.addEventListener("change", () => { FC.mode.value = "older"; });
+  FC.device_id.addEventListener("change", () => { FC.mode.value = "device"; });
+  FC.days.addEventListener("focus", () => { FC.mode.value = "older"; clPreview(); });
+  FC.device_id.addEventListener("focus", () => { FC.mode.value = "device"; clPreview(); });
+  FC.addEventListener("change", clPreview);
+  FC.onsubmit = async e => {
+    e.preventDefault();
+    const body = clBody();
+    const run = async () => { const j = await api("events/clear", body); toast("info", t("Đã xoá {0} sự kiện", j.deleted)); };
+    if (body.mode === "all") {
+      $("mClearLog").hidden = true;
+      confirmBox(t("Xoá toàn bộ nhật ký sự kiện?"),
+        t("Toàn bộ nhật ký sẽ bị xoá vĩnh viễn. Nên bấm <b>Xuất nhật ký CSV</b> để lưu lại trước."), true, run);
+      return;
+    }
+    try { await run(); close(FC); } catch (err) { $("clErr").textContent = err.message; }
+  };
+  $("clExport").onclick = () => { location.href = "api/events/export"; };
+  $("logClear").onclick = () => openClearLog();
+  // xoa tung su kien (nut ✕ khi tro chuot vao dong nhat ky)
+  $("events").addEventListener("mousedown", async e => {
+    const b = e.target.closest("[data-evdel]");
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    b.disabled = true;
+    try { await api("events/clear", { mode: "ids", ids: [+b.dataset.evdel] }); }
+    catch (err) { toast("down", err.message); b.disabled = false; }
+  });
+  // trong o lich su da ghim: "Xoa nhat ky thiet bi nay"
+  $("hist").addEventListener("click", e => {
+    const a = e.target.closest("[data-clearhist]");
+    if (!a) return;
+    e.preventDefault();
+    const id = +a.dataset.clearhist; hideHist(); openClearLog(id);
+  });
 
   // ------------------------------------------------------------ kieu hien thi
   function applyView() {
